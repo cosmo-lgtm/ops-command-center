@@ -867,15 +867,21 @@ def main():
         if not trend_df.empty:
             trend_sorted = trend_df.sort_values('week_start')
 
+            # Calculate 4-week moving averages
+            trend_sorted['orders_ma'] = trend_sorted['qty_ordered'].rolling(window=4, min_periods=2).mean()
+            trend_sorted['depletion_ma'] = trend_sorted['qty_depleted'].rolling(window=4, min_periods=2).mean()
+
             fig = go.Figure()
 
+            # Raw data lines
             fig.add_trace(go.Scatter(
                 x=trend_sorted['week_start'],
                 y=trend_sorted['qty_ordered'],
                 mode='lines+markers',
                 name='Qty Ordered (SF)',
-                line=dict(color=COLORS['primary'], width=3),
-                marker=dict(size=8)
+                line=dict(color=COLORS['primary'], width=2),
+                marker=dict(size=6),
+                opacity=0.7
             ))
 
             fig.add_trace(go.Scatter(
@@ -883,8 +889,26 @@ def main():
                 y=trend_sorted['qty_depleted'],
                 mode='lines+markers',
                 name='Qty Depleted (VIP)',
-                line=dict(color=COLORS['secondary'], width=3),
-                marker=dict(size=8)
+                line=dict(color=COLORS['secondary'], width=2),
+                marker=dict(size=6),
+                opacity=0.7
+            ))
+
+            # Moving average lines (thicker, no markers)
+            fig.add_trace(go.Scatter(
+                x=trend_sorted['week_start'],
+                y=trend_sorted['orders_ma'],
+                mode='lines',
+                name='Orders 4-wk MA',
+                line=dict(color=COLORS['primary'], width=4),
+            ))
+
+            fig.add_trace(go.Scatter(
+                x=trend_sorted['week_start'],
+                y=trend_sorted['depletion_ma'],
+                mode='lines',
+                name='Depletion 4-wk MA',
+                line=dict(color=COLORS['secondary'], width=4),
             ))
 
             apply_dark_theme(fig, height=350,
