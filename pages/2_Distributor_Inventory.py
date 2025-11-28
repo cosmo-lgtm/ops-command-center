@@ -1147,45 +1147,45 @@ def main():
                 st.markdown('<p style="color: #ccd6f6; font-size: 14px; margin-top: 10px;">📦 <b>Orders Forecast</b></p>', unsafe_allow_html=True)
                 ocol1, ocol2 = st.columns(2)
                 with ocol1:
-                    orders_4wk = forecast_df.head(4)['orders_ensemble'].sum()
-                    st.markdown(render_metric_card(f"{orders_4wk:,.0f}", "Next 4 Weeks", "primary"), unsafe_allow_html=True)
-                with ocol2:
-                    orders_8wk = forecast_df.head(8)['orders_ensemble'].sum()
-                    st.markdown(render_metric_card(f"{orders_8wk:,.0f}", "Next 8 Weeks", "primary"), unsafe_allow_html=True)
-
-                ocol3, ocol4 = st.columns(2)
-                with ocol3:
-                    orders_12wk = forecast_df['orders_ensemble'].sum()
-                    st.markdown(render_metric_card(f"{orders_12wk:,.0f}", "Next 12 Weeks", "primary"), unsafe_allow_html=True)
-                with ocol4:
                     o_first = forecast_df.head(6)['orders_ensemble'].mean()
                     o_second = forecast_df.tail(6)['orders_ensemble'].mean()
                     o_trend = ((o_second - o_first) / o_first * 100) if o_first > 0 else 0
                     o_label = "Trending Up" if o_trend > 5 else ("Trending Down" if o_trend < -5 else "Stable")
                     o_type = "primary" if o_trend > 5 else ("danger" if o_trend < -5 else "warning")
                     st.markdown(render_metric_card(f"{o_trend:+.1f}%", o_label, o_type), unsafe_allow_html=True)
+                with ocol2:
+                    orders_4wk = forecast_df.head(4)['orders_ensemble'].sum()
+                    st.markdown(render_metric_card(f"{orders_4wk:,.0f}", "Next 4 Weeks", "primary"), unsafe_allow_html=True)
+
+                ocol3, ocol4 = st.columns(2)
+                with ocol3:
+                    orders_8wk = forecast_df.head(8)['orders_ensemble'].sum()
+                    st.markdown(render_metric_card(f"{orders_8wk:,.0f}", "Next 8 Weeks", "primary"), unsafe_allow_html=True)
+                with ocol4:
+                    orders_12wk = forecast_df['orders_ensemble'].sum()
+                    st.markdown(render_metric_card(f"{orders_12wk:,.0f}", "Next 12 Weeks", "primary"), unsafe_allow_html=True)
 
             with mcol2:
                 st.markdown('<p style="color: #ccd6f6; font-size: 14px; margin-top: 10px;">📉 <b>Depletion Forecast</b></p>', unsafe_allow_html=True)
                 dcol1, dcol2 = st.columns(2)
                 with dcol1:
-                    depl_4wk = forecast_df.head(4)['depletion_ensemble'].sum()
-                    st.markdown(render_metric_card(f"{depl_4wk:,.0f}", "Next 4 Weeks", "primary"), unsafe_allow_html=True)
-                with dcol2:
-                    depl_8wk = forecast_df.head(8)['depletion_ensemble'].sum()
-                    st.markdown(render_metric_card(f"{depl_8wk:,.0f}", "Next 8 Weeks", "primary"), unsafe_allow_html=True)
-
-                dcol3, dcol4 = st.columns(2)
-                with dcol3:
-                    depl_12wk = forecast_df['depletion_ensemble'].sum()
-                    st.markdown(render_metric_card(f"{depl_12wk:,.0f}", "Next 12 Weeks", "primary"), unsafe_allow_html=True)
-                with dcol4:
                     d_first = forecast_df.head(6)['depletion_ensemble'].mean()
                     d_second = forecast_df.tail(6)['depletion_ensemble'].mean()
                     d_trend = ((d_second - d_first) / d_first * 100) if d_first > 0 else 0
                     d_label = "Trending Up" if d_trend > 5 else ("Trending Down" if d_trend < -5 else "Stable")
                     d_type = "primary" if d_trend > 5 else ("danger" if d_trend < -5 else "warning")
                     st.markdown(render_metric_card(f"{d_trend:+.1f}%", d_label, d_type), unsafe_allow_html=True)
+                with dcol2:
+                    depl_4wk = forecast_df.head(4)['depletion_ensemble'].sum()
+                    st.markdown(render_metric_card(f"{depl_4wk:,.0f}", "Next 4 Weeks", "primary"), unsafe_allow_html=True)
+
+                dcol3, dcol4 = st.columns(2)
+                with dcol3:
+                    depl_8wk = forecast_df.head(8)['depletion_ensemble'].sum()
+                    st.markdown(render_metric_card(f"{depl_8wk:,.0f}", "Next 8 Weeks", "primary"), unsafe_allow_html=True)
+                with dcol4:
+                    depl_12wk = forecast_df['depletion_ensemble'].sum()
+                    st.markdown(render_metric_card(f"{depl_12wk:,.0f}", "Next 12 Weeks", "primary"), unsafe_allow_html=True)
 
         else:
             st.info("Not enough historical data to generate forecast (need at least 4 weeks)")
