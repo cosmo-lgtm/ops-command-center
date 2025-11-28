@@ -6,10 +6,12 @@ identify overstock/understock situations by distributor and product.
 
 import streamlit as st
 import pandas as pd
+import numpy as np
 from google.cloud import bigquery
 from datetime import datetime, timedelta
 import plotly.express as px
 import plotly.graph_objects as go
+from scipy import stats
 
 # Dark mode custom CSS
 st.markdown("""
@@ -295,6 +297,7 @@ def load_inventory_data(lookback_days: int = 90):
             MAX(sfo.order_date) as last_order_date
         FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
         WHERE sfo.account_type = 'Distributor'
+            AND sfo.status != 'Draft'
             AND sfo.order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
             AND sfo.order_date <= CURRENT_DATE()
         GROUP BY account_id, customer_name
@@ -539,6 +542,7 @@ def load_trend_data(lookback_weeks: int = 12):
             COUNT(DISTINCT order_id) as order_count
         FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened`
         WHERE account_type = 'Distributor'
+            AND status != 'Draft'
             AND order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_weeks} WEEK)
             AND order_date <= CURRENT_DATE()
         GROUP BY week_start
@@ -569,6 +573,114 @@ def load_trend_data(lookback_weeks: int = 12):
     ORDER BY week_start
     """
     return client.query(query).to_dataframe()
+
+
+def generate_ensemble_forecast(trend_df: pd.DataFrame, forecast_weeks: int = 12):
+    """
+    Generate 3-month (12-week) forecast using ensemble of 3 models:
+    1. Linear Regression
+    2. Exponential Smoothing (Simple)
+    3. Moving Average with Trend
+
+    Returns forecast dataframe with ensemble prediction and confidence intervals.
+    """
+    if len(trend_df) < 4:
+        return None
+
+    # Sort by week and prepare data
+    df = trend_df.sort_values('week_start').copy()
+    df = df.dropna(subset=['qty_depleted'])
+
+    if len(df) < 4:
+        return None
+
+    # Historical values
+    y = df['qty_depleted'].values
+    n = len(y)
+    x = np.arange(n)
+
+    # Future periods
+    future_x = np.arange(n, n + forecast_weeks)
+    future_weeks = pd.date_range(
+        start=df['week_start'].max() + timedelta(weeks=1),
+        periods=forecast_weeks,
+        freq='W-SUN'
+    )
+
+    # === Model 1: Linear Regression ===
+    slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
+    lr_forecast = intercept + slope * future_x
+    lr_forecast = np.maximum(lr_forecast, 0)  # Can't have negative depletion
+
+    # === Model 2: Exponential Smoothing (Simple) ===
+    alpha = 0.3  # Smoothing factor
+    smoothed = np.zeros(n)
+    smoothed[0] = y[0]
+    for i in range(1, n):
+        smoothed[i] = alpha * y[i] + (1 - alpha) * smoothed[i-1]
+
+    # For forecast, continue with trend from last few periods
+    recent_trend = (smoothed[-1] - smoothed[-4]) / 4 if n >= 4 else 0
+    es_forecast = np.array([smoothed[-1] + recent_trend * (i+1) for i in range(forecast_weeks)])
+    es_forecast = np.maximum(es_forecast, 0)
+
+    # === Model 3: Moving Average with Trend ===
+    window = min(4, n)
+    ma = np.convolve(y, np.ones(window)/window, mode='valid')
+
+    # Calculate trend from MA
+    if len(ma) >= 2:
+        ma_trend = (ma[-1] - ma[0]) / len(ma)
+    else:
+        ma_trend = 0
+
+    ma_base = ma[-1] if len(ma) > 0 else y[-1]
+    mat_forecast = np.array([ma_base + ma_trend * (i+1) for i in range(forecast_weeks)])
+    mat_forecast = np.maximum(mat_forecast, 0)
+
+    # === Ensemble: Average of 3 models ===
+    ensemble_forecast = (lr_forecast + es_forecast + mat_forecast) / 3
+
+    # === Confidence Intervals ===
+    # Use historical volatility and model disagreement for uncertainty
+    historical_std = np.std(y)
+    model_std = np.std([lr_forecast, es_forecast, mat_forecast], axis=0)
+
+    # Combined uncertainty grows with forecast horizon
+    uncertainty = np.sqrt(historical_std**2 + model_std**2)
+    horizon_factor = np.sqrt(np.arange(1, forecast_weeks + 1))
+
+    # 80% confidence interval
+    ci_80_lower = ensemble_forecast - 1.28 * uncertainty * horizon_factor
+    ci_80_upper = ensemble_forecast + 1.28 * uncertainty * horizon_factor
+
+    # 95% confidence interval (cone of certainty)
+    ci_95_lower = ensemble_forecast - 1.96 * uncertainty * horizon_factor
+    ci_95_upper = ensemble_forecast + 1.96 * uncertainty * horizon_factor
+
+    # Ensure non-negative
+    ci_80_lower = np.maximum(ci_80_lower, 0)
+    ci_95_lower = np.maximum(ci_95_lower, 0)
+
+    # Build forecast dataframe
+    forecast_df = pd.DataFrame({
+        'week_start': future_weeks,
+        'is_forecast': True,
+        'ensemble_forecast': ensemble_forecast,
+        'lr_forecast': lr_forecast,
+        'es_forecast': es_forecast,
+        'mat_forecast': mat_forecast,
+        'ci_80_lower': ci_80_lower,
+        'ci_80_upper': ci_80_upper,
+        'ci_95_lower': ci_95_lower,
+        'ci_95_upper': ci_95_upper
+    })
+
+    # Also return historical data for plotting continuity
+    historical_df = df[['week_start', 'qty_depleted']].copy()
+    historical_df['is_forecast'] = False
+
+    return forecast_df, historical_df
 
 
 def render_metric_card(value, label, card_type="primary"):
@@ -778,6 +890,140 @@ def main():
 
         apply_dark_theme(fig, height=350, showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
+
+    # Forecast Section: 3-Month Depletion Forecast with Cone of Certainty
+    st.markdown('<p class="section-header">📈 3-Month Depletion Forecast</p>', unsafe_allow_html=True)
+    st.markdown('<p style="color: #8892b0; font-size: 14px; margin-top: -10px;">Ensemble forecast using Linear Regression, Exponential Smoothing, and Moving Average with Trend</p>', unsafe_allow_html=True)
+
+    if not trend_df.empty:
+        forecast_result = generate_ensemble_forecast(trend_df, forecast_weeks=12)
+
+        if forecast_result is not None:
+            forecast_df, historical_df = forecast_result
+
+            fig = go.Figure()
+
+            # Historical depletion line
+            fig.add_trace(go.Scatter(
+                x=historical_df['week_start'],
+                y=historical_df['qty_depleted'],
+                mode='lines+markers',
+                name='Historical Depletion',
+                line=dict(color=COLORS['secondary'], width=3),
+                marker=dict(size=8)
+            ))
+
+            # 95% Confidence interval (outer cone)
+            fig.add_trace(go.Scatter(
+                x=pd.concat([forecast_df['week_start'], forecast_df['week_start'][::-1]]),
+                y=pd.concat([forecast_df['ci_95_upper'], forecast_df['ci_95_lower'][::-1]]),
+                fill='toself',
+                fillcolor='rgba(102, 126, 234, 0.15)',
+                line=dict(color='rgba(0,0,0,0)'),
+                name='95% Confidence',
+                showlegend=True,
+                hoverinfo='skip'
+            ))
+
+            # 80% Confidence interval (inner cone)
+            fig.add_trace(go.Scatter(
+                x=pd.concat([forecast_df['week_start'], forecast_df['week_start'][::-1]]),
+                y=pd.concat([forecast_df['ci_80_upper'], forecast_df['ci_80_lower'][::-1]]),
+                fill='toself',
+                fillcolor='rgba(102, 126, 234, 0.3)',
+                line=dict(color='rgba(0,0,0,0)'),
+                name='80% Confidence',
+                showlegend=True,
+                hoverinfo='skip'
+            ))
+
+            # Individual model forecasts (dashed lines)
+            fig.add_trace(go.Scatter(
+                x=forecast_df['week_start'],
+                y=forecast_df['lr_forecast'],
+                mode='lines',
+                name='Linear Regression',
+                line=dict(color='#ff6b6b', width=1, dash='dot'),
+                opacity=0.6
+            ))
+
+            fig.add_trace(go.Scatter(
+                x=forecast_df['week_start'],
+                y=forecast_df['es_forecast'],
+                mode='lines',
+                name='Exponential Smoothing',
+                line=dict(color='#ffd666', width=1, dash='dot'),
+                opacity=0.6
+            ))
+
+            fig.add_trace(go.Scatter(
+                x=forecast_df['week_start'],
+                y=forecast_df['mat_forecast'],
+                mode='lines',
+                name='MA with Trend',
+                line=dict(color='#64ffda', width=1, dash='dot'),
+                opacity=0.6
+            ))
+
+            # Ensemble forecast (main prediction line)
+            fig.add_trace(go.Scatter(
+                x=forecast_df['week_start'],
+                y=forecast_df['ensemble_forecast'],
+                mode='lines+markers',
+                name='Ensemble Forecast',
+                line=dict(color=COLORS['primary'], width=3),
+                marker=dict(size=8, symbol='diamond')
+            ))
+
+            # Add vertical line to separate historical from forecast
+            last_historical = historical_df['week_start'].max()
+            fig.add_vline(
+                x=last_historical,
+                line_dash="dash",
+                line_color="#8892b0",
+                annotation_text="Forecast Start",
+                annotation_position="top",
+                annotation_font_color="#8892b0"
+            )
+
+            apply_dark_theme(fig, height=400,
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#8892b0', size=10)),
+                hovermode='x unified'
+            )
+            fig.update_layout(
+                xaxis_title="Week",
+                yaxis_title="Units Depleted"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Forecast summary metrics
+            fcol1, fcol2, fcol3, fcol4 = st.columns(4)
+
+            with fcol1:
+                next_4_weeks = forecast_df.head(4)['ensemble_forecast'].sum()
+                st.markdown(render_metric_card(f"{next_4_weeks:,.0f}", "Forecast: Next 4 Weeks", "primary"), unsafe_allow_html=True)
+
+            with fcol2:
+                next_8_weeks = forecast_df.head(8)['ensemble_forecast'].sum()
+                st.markdown(render_metric_card(f"{next_8_weeks:,.0f}", "Forecast: Next 8 Weeks", "primary"), unsafe_allow_html=True)
+
+            with fcol3:
+                total_12_weeks = forecast_df['ensemble_forecast'].sum()
+                st.markdown(render_metric_card(f"{total_12_weeks:,.0f}", "Forecast: Next 12 Weeks", "primary"), unsafe_allow_html=True)
+
+            with fcol4:
+                # Calculate trend direction
+                first_half = forecast_df.head(6)['ensemble_forecast'].mean()
+                second_half = forecast_df.tail(6)['ensemble_forecast'].mean()
+                trend_pct = ((second_half - first_half) / first_half * 100) if first_half > 0 else 0
+                trend_label = "Trending Up" if trend_pct > 5 else ("Trending Down" if trend_pct < -5 else "Stable")
+                trend_type = "primary" if trend_pct > 5 else ("danger" if trend_pct < -5 else "warning")
+                st.markdown(render_metric_card(f"{trend_pct:+.1f}%", trend_label, trend_type), unsafe_allow_html=True)
+
+        else:
+            st.info("Not enough historical data to generate forecast (need at least 4 weeks)")
+    else:
+        st.info("No trend data available for forecasting")
 
     # Charts Row 2: Top Overstocked + Top Understocked
     col1, col2 = st.columns(2)
