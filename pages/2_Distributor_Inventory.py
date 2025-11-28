@@ -894,13 +894,13 @@ def main():
                 opacity=0.7
             ))
 
-            # Moving average lines (thicker, no markers)
+            # Moving average lines (dashed for distinction)
             fig.add_trace(go.Scatter(
                 x=trend_sorted['week_start'],
                 y=trend_sorted['orders_ma'],
                 mode='lines',
                 name='Orders 4-wk MA',
-                line=dict(color=COLORS['primary'], width=4),
+                line=dict(color=COLORS['primary'], width=3, dash='dash'),
             ))
 
             fig.add_trace(go.Scatter(
@@ -908,7 +908,7 @@ def main():
                 y=trend_sorted['depletion_ma'],
                 mode='lines',
                 name='Depletion 4-wk MA',
-                line=dict(color=COLORS['secondary'], width=4),
+                line=dict(color=COLORS['secondary'], width=3, dash='dash'),
             ))
 
             apply_dark_theme(fig, height=350,
