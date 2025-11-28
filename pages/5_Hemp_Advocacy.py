@@ -7,7 +7,15 @@ import pandas as pd
 import plotly.graph_objects as go
 from google.cloud import bigquery
 
-# Dark mode CSS with emerald green accent
+# Page config - collapse sidebar for full width
+st.set_page_config(
+    page_title="Hemp Advocacy",
+    page_icon="🌿",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# Dark mode CSS with emerald green accent + hide sidebar
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
