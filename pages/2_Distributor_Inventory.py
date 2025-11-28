@@ -920,41 +920,47 @@ def main():
             st.info("No trend data available")
 
     with col2:
-        st.markdown('<p class="section-header">Inventory Status</p>', unsafe_allow_html=True)
+        st.markdown('<p class="section-header">Inventory Health Distribution</p>', unsafe_allow_html=True)
 
-        status_data = pd.DataFrame({
-            'Status': ['Balanced', 'Overstock', 'Understock', 'No Depletion Data', 'No Recent Orders'],
-            'Count': [
-                balanced_count,
-                overstock_count,
-                understock_count,
-                no_depletion_count,
-                no_orders_count
-            ]
-        })
-        status_data = status_data[status_data['Count'] > 0]
+        # Filter to distributors with valid weeks_of_inventory data
+        health_df = filtered_df[
+            (filtered_df['weeks_of_inventory'].notna()) &
+            (filtered_df['weeks_of_inventory'] > 0) &
+            (filtered_df['weeks_of_inventory'] < 100)  # Cap outliers
+        ]['weeks_of_inventory']
 
-        status_colors = {
-            'Balanced': COLORS['success'],
-            'Overstock': COLORS['warning'],
-            'Understock': COLORS['danger'],
-            'No Depletion Data': '#8892b0',
-            'No Recent Orders': '#667eea'
-        }
-        pie_colors = [status_colors.get(s, '#8892b0') for s in status_data['Status']]
+        if len(health_df) > 0:
+            fig = go.Figure()
 
-        fig = go.Figure(data=[go.Pie(
-            labels=status_data['Status'],
-            values=status_data['Count'],
-            hole=0.6,
-            marker=dict(colors=pie_colors),
-            textinfo='label+value',
-            textposition='outside',
-            textfont=dict(color='#ccd6f6')
-        )])
+            # Create histogram with color-coded bins
+            # Understock: <4 weeks (red), Balanced: 4-12 weeks (green), Overstock: >12 weeks (yellow)
+            fig.add_trace(go.Histogram(
+                x=health_df,
+                nbinsx=20,
+                marker=dict(
+                    color=health_df.apply(lambda x: COLORS['danger'] if x < 4 else (COLORS['warning'] if x > 12 else COLORS['success'])),
+                    line=dict(color='#1a1a2e', width=1)
+                ),
+                hovertemplate='%{x:.0f} weeks: %{y} distributors<extra></extra>'
+            ))
 
-        apply_dark_theme(fig, height=350, showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
+            # Add vertical reference lines
+            fig.add_vline(x=4, line_dash="dash", line_color=COLORS['danger'],
+                         annotation_text="Understock", annotation_position="top",
+                         annotation_font_color=COLORS['danger'], annotation_font_size=10)
+            fig.add_vline(x=12, line_dash="dash", line_color=COLORS['warning'],
+                         annotation_text="Overstock", annotation_position="top",
+                         annotation_font_color=COLORS['warning'], annotation_font_size=10)
+
+            apply_dark_theme(fig, height=350, showlegend=False)
+            fig.update_layout(
+                xaxis_title="Weeks of Inventory",
+                yaxis_title="# Distributors",
+                bargap=0.1
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No inventory data available for distribution")
 
     # Forecast Section: 3-Month Orders & Depletion Forecast with Cone of Certainty
     st.markdown('<p class="section-header">📈 3-Month Forecast</p>', unsafe_allow_html=True)
