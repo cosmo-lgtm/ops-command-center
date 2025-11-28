@@ -920,47 +920,87 @@ def main():
             st.info("No trend data available")
 
     with col2:
-        st.markdown('<p class="section-header">Inventory Health Distribution</p>', unsafe_allow_html=True)
+        st.markdown('<p class="section-header">Distributor Inventory Health</p>', unsafe_allow_html=True)
 
-        # Filter to distributors with valid weeks_of_inventory data
-        health_df = filtered_df[
-            (filtered_df['weeks_of_inventory'].notna()) &
-            (filtered_df['weeks_of_inventory'] > 0) &
-            (filtered_df['weeks_of_inventory'] < 100)  # Cap outliers
-        ]['weeks_of_inventory']
+        # Count distributors with and without depletion data
+        has_depletion = filtered_df[
+            (filtered_df['total_qty_depleted'].notna()) &
+            (filtered_df['total_qty_depleted'] > 0)
+        ]
+        no_depletion = filtered_df[
+            (filtered_df['total_qty_depleted'].isna()) |
+            (filtered_df['total_qty_depleted'] == 0)
+        ]
 
-        if len(health_df) > 0:
-            fig = go.Figure()
+        # For those with depletion, categorize by weeks of inventory
+        understock_count = len(has_depletion[has_depletion['weeks_of_inventory'] < 4])
+        balanced_count_chart = len(has_depletion[
+            (has_depletion['weeks_of_inventory'] >= 4) &
+            (has_depletion['weeks_of_inventory'] <= 12)
+        ])
+        overstock_count_chart = len(has_depletion[has_depletion['weeks_of_inventory'] > 12])
+        no_depletion_count_chart = len(no_depletion)
 
-            # Create histogram with color-coded bins
-            # Understock: <4 weeks (red), Balanced: 4-12 weeks (green), Overstock: >12 weeks (yellow)
-            fig.add_trace(go.Histogram(
-                x=health_df,
-                nbinsx=20,
-                marker=dict(
-                    color=health_df.apply(lambda x: COLORS['danger'] if x < 4 else (COLORS['warning'] if x > 12 else COLORS['success'])),
-                    line=dict(color='#1a1a2e', width=1)
-                ),
-                hovertemplate='%{x:.0f} weeks: %{y} distributors<extra></extra>'
-            ))
+        fig = go.Figure()
 
-            # Add vertical reference lines
-            fig.add_vline(x=4, line_dash="dash", line_color=COLORS['danger'],
-                         annotation_text="Understock", annotation_position="top",
-                         annotation_font_color=COLORS['danger'], annotation_font_size=10)
-            fig.add_vline(x=12, line_dash="dash", line_color=COLORS['warning'],
-                         annotation_text="Overstock", annotation_position="top",
-                         annotation_font_color=COLORS['warning'], annotation_font_size=10)
+        # Stacked bar: With Depletion Data (broken down by health)
+        fig.add_trace(go.Bar(
+            name='Understock (<4 wks)',
+            x=['With Depletion'],
+            y=[understock_count],
+            marker_color=COLORS['danger'],
+            text=[understock_count] if understock_count > 0 else None,
+            textposition='inside',
+            textfont=dict(color='white', size=14)
+        ))
 
-            apply_dark_theme(fig, height=350, showlegend=False)
-            fig.update_layout(
-                xaxis_title="Weeks of Inventory",
-                yaxis_title="# Distributors",
-                bargap=0.1
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No inventory data available for distribution")
+        fig.add_trace(go.Bar(
+            name='Balanced (4-12 wks)',
+            x=['With Depletion'],
+            y=[balanced_count_chart],
+            marker_color=COLORS['success'],
+            text=[balanced_count_chart] if balanced_count_chart > 0 else None,
+            textposition='inside',
+            textfont=dict(color='white', size=14)
+        ))
+
+        fig.add_trace(go.Bar(
+            name='Overstock (>12 wks)',
+            x=['With Depletion'],
+            y=[overstock_count_chart],
+            marker_color=COLORS['warning'],
+            text=[overstock_count_chart] if overstock_count_chart > 0 else None,
+            textposition='inside',
+            textfont=dict(color='white', size=14)
+        ))
+
+        # Second bar: No Depletion Data
+        fig.add_trace(go.Bar(
+            name='No Depletion Data',
+            x=['No Depletion'],
+            y=[no_depletion_count_chart],
+            marker_color='#8892b0',
+            text=[no_depletion_count_chart] if no_depletion_count_chart > 0 else None,
+            textposition='inside',
+            textfont=dict(color='white', size=14),
+            showlegend=True
+        ))
+
+        apply_dark_theme(fig, height=350)
+        fig.update_layout(
+            barmode='stack',
+            yaxis_title="# Distributors",
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="center",
+                x=0.5,
+                font=dict(color='#8892b0', size=10)
+            ),
+            xaxis=dict(tickfont=dict(color='#ccd6f6'))
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
     # Forecast Section: 3-Month Orders & Depletion Forecast with Cone of Certainty
     st.markdown('<p class="section-header">📈 3-Month Forecast</p>', unsafe_allow_html=True)
