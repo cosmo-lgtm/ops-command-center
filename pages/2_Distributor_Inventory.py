@@ -616,16 +616,35 @@ def _forecast_single_series(y: np.ndarray, forecast_weeks: int = 12):
     # === Ensemble: Average of 3 models ===
     ensemble = (lr_forecast + es_forecast + mat_forecast) / 3
 
-    # === Confidence Intervals ===
-    historical_std = np.std(y)
-    model_std = np.std([lr_forecast, es_forecast, mat_forecast], axis=0)
-    uncertainty = np.sqrt(historical_std**2 + model_std**2)
-    horizon_factor = np.sqrt(np.arange(1, forecast_weeks + 1))
+    # === Confidence Intervals (tightened for practical use) ===
+    # Use coefficient of variation (CV) for relative uncertainty
+    mean_val = np.mean(y)
+    cv = np.std(y) / mean_val if mean_val > 0 else 0.15
 
-    ci_80_lower = np.maximum(ensemble - 1.28 * uncertainty * horizon_factor, 0)
-    ci_80_upper = ensemble + 1.28 * uncertainty * horizon_factor
-    ci_95_lower = np.maximum(ensemble - 1.96 * uncertainty * horizon_factor, 0)
-    ci_95_upper = ensemble + 1.96 * uncertainty * horizon_factor
+    # Cap CV at reasonable levels (15-25% typical for sales data)
+    cv = min(cv, 0.25)
+
+    # Model disagreement as percentage of ensemble
+    model_spread = np.std([lr_forecast, es_forecast, mat_forecast], axis=0)
+    model_cv = model_spread / (ensemble + 1)  # +1 to avoid division by zero
+
+    # Combined uncertainty: blend of historical CV and model disagreement
+    # Weight model disagreement less since ensemble averages it out
+    combined_cv = np.sqrt((cv * 0.6)**2 + (model_cv * 0.4)**2)
+
+    # Gentle horizon growth (log instead of sqrt for tighter long-term bounds)
+    horizon_factor = 1 + 0.15 * np.log1p(np.arange(forecast_weeks))
+
+    # Calculate bounds as percentage of forecast
+    uncertainty_pct = combined_cv * horizon_factor
+
+    # 80% CI: ~1.28 std devs but scaled down
+    ci_80_lower = np.maximum(ensemble * (1 - 0.8 * uncertainty_pct), 0)
+    ci_80_upper = ensemble * (1 + 0.8 * uncertainty_pct)
+
+    # 95% CI: ~1.96 std devs but scaled down
+    ci_95_lower = np.maximum(ensemble * (1 - 1.2 * uncertainty_pct), 0)
+    ci_95_upper = ensemble * (1 + 1.2 * uncertainty_pct)
 
     return {
         'ensemble': ensemble,
