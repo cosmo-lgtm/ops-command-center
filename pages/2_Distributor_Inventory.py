@@ -953,63 +953,60 @@ def main():
 
             st.plotly_chart(fig, use_container_width=True)
 
-            # State summary table below the map
-            col1, col2 = st.columns([2, 1])
+            # State coverage stats in a row
+            total_states = len(state_df)
+            total_depleted = state_df['total_depleted'].sum()
+            total_doors = state_df['total_doors'].sum()
+            total_pods = state_df['total_pods'].sum()
+            top_state = state_df.iloc[0]['state'] if len(state_df) > 0 else 'N/A'
+            top_state_pct = (state_df.iloc[0]['total_depleted'] / total_depleted * 100) if total_depleted > 0 else 0
 
-            with col1:
-                st.markdown("**Top States by Depletion**")
-                state_display = state_df[['state', 'distributor_count', 'total_depleted', 'total_doors', 'total_pods', 'avg_pods_per_dist', 'weekly_rate']].head(15).copy()
-                state_display['total_depleted'] = state_display['total_depleted'].apply(lambda x: f"{x:,.0f}")
-                state_display['weekly_rate'] = state_display['weekly_rate'].apply(lambda x: f"{x:,.0f}")
-                state_display['total_doors'] = state_display['total_doors'].apply(lambda x: f"{x:,.0f}")
-                state_display['total_pods'] = state_display['total_pods'].apply(lambda x: f"{x:,.0f}")
-                state_display['avg_pods_per_dist'] = state_display['avg_pods_per_dist'].apply(lambda x: f"{x:,.0f}")
-                state_display.columns = ['State', 'Distributors', 'Total Depleted', 'Doors', 'PODs', 'Avg PODs/Dist', 'Weekly Rate']
-
-                st.dataframe(
-                    state_display,
-                    use_container_width=True,
-                    hide_index=True,
-                    height=350
-                )
-
-            with col2:
-                # State coverage stats
-                total_states = len(state_df)
-                total_depleted = state_df['total_depleted'].sum()
-                total_doors = state_df['total_doors'].sum()
-                total_pods = state_df['total_pods'].sum()
-                avg_pods = total_pods / len(state_df) if len(state_df) > 0 else 0
-                top_state = state_df.iloc[0]['state'] if len(state_df) > 0 else 'N/A'
-                top_state_pct = (state_df.iloc[0]['total_depleted'] / total_depleted * 100) if total_depleted > 0 else 0
-
+            metric_cols = st.columns(4)
+            with metric_cols[0]:
                 st.markdown(f"""
                 <div class="metric-card">
                     <p class="metric-value">{total_states}</p>
                     <p class="metric-label">States with Depletion</p>
                 </div>
                 """, unsafe_allow_html=True)
-
+            with metric_cols[1]:
                 st.markdown(f"""
-                <div class="metric-card" style="margin-top: 16px;">
+                <div class="metric-card">
                     <p class="metric-value">{total_doors:,.0f}</p>
                     <p class="metric-label">Total Doors (Active)</p>
                 </div>
                 """, unsafe_allow_html=True)
-
+            with metric_cols[2]:
                 st.markdown(f"""
-                <div class="metric-card" style="margin-top: 16px;">
+                <div class="metric-card">
                     <p class="metric-value">{total_pods:,.0f}</p>
                     <p class="metric-label">Total PODs</p>
                 </div>
                 """, unsafe_allow_html=True)
-
+            with metric_cols[3]:
                 st.markdown(f"""
-                <div class="metric-card" style="margin-top: 16px;">
+                <div class="metric-card">
                     <p class="metric-value">{top_state}</p>
                     <p class="metric-label">Top State ({top_state_pct:.1f}%)</p>
                 </div>
                 """, unsafe_allow_html=True)
+
+            # Full-width state table
+            st.markdown("**Top States by Depletion**")
+            state_display = state_df[['state', 'distributor_count', 'total_depleted', 'total_doors', 'total_pods', 'avg_pods_per_dist', 'weekly_rate']].head(15).copy()
+            state_display['total_depleted'] = state_display['total_depleted'].apply(lambda x: f"{x:,.0f}")
+            state_display['weekly_rate'] = state_display['weekly_rate'].apply(lambda x: f"{x:,.0f}")
+            state_display['total_doors'] = state_display['total_doors'].apply(lambda x: f"{x:,.0f}")
+            state_display['total_pods'] = state_display['total_pods'].apply(lambda x: f"{x:,.0f}")
+            state_display['avg_pods_per_dist'] = state_display['avg_pods_per_dist'].apply(lambda x: f"{x:,.0f}")
+            state_display.columns = ['State', 'Distributors', 'Total Depleted', 'Doors', 'PODs', 'Avg PODs/Dist', 'Weekly Rate']
+
+            st.dataframe(
+                state_display,
+                use_container_width=True,
+                hide_index=True,
+                height=400
+            )
         else:
             st.info("No state-level depletion data available")
     except Exception as e:
