@@ -261,11 +261,12 @@ def load_inventory_data(lookback_days: int = 90):
     """
     Load comprehensive inventory data combining:
     - Salesforce orders (what we ship TO distributors) - ALL distributor orders
-    - VIP depletion (what distributors sell THROUGH to retail) - where matched
+    - VIP depletion (what distributors sell THROUGH to retail) - rolled up via parent relationships
 
-    This uses a UNION approach:
-    1. All Salesforce distributor orders (with VIP match where available)
-    2. VIP-only distributors (no recent SF orders)
+    This uses parent account rollup:
+    1. VIP distributors link to SF child accounts (with VIP_ID__c)
+    2. SF orders are placed on parent/HQ accounts
+    3. We roll up VIP depletion from children to parent order accounts
 
     Inventory Health Calculation:
     - Order/Depletion Ratio > 1.3 = Overstock (building inventory faster than depleting)
@@ -306,106 +307,123 @@ def load_inventory_data(lookback_days: int = 90):
         GROUP BY sl.Dist_Code
     ),
 
-    -- Distributor dimension (VIP)
-    distributors AS (
+    -- VIP distributor to SF account mapping (child accounts with VIP codes)
+    -- Also get the parent account ID for rollup
+    vip_to_sf AS (
         SELECT
-            distributor_code,
-            distributor_name,
-            sfdc_distributor_account_id,
-            CAST(total_retailers AS INT64) as total_retailers
-        FROM `artful-logic-475116-p1.staging_vip.distributor_fact_sheet_v2`
+            v.distributor_code,
+            v.distributor_name as vip_dist_name,
+            v.sfdc_distributor_account_id as sf_child_id,
+            a.ParentId as sf_parent_id,
+            CAST(v.total_retailers AS INT64) as total_retailers
+        FROM `artful-logic-475116-p1.staging_vip.distributor_fact_sheet_v2` v
+        LEFT JOIN `artful-logic-475116-p1.raw_salesforce.Account` a
+            ON v.sfdc_distributor_account_id = a.Id
     ),
 
-    -- All SF distributor orders (primary source of truth for orders)
-    sf_with_vip AS (
+    -- Roll up VIP depletion to SF order accounts
+    -- Match either: direct (order account = VIP account) OR parent (order account = parent of VIP account)
+    sf_with_rollup AS (
         SELECT
-            COALESCE(d.distributor_code, 'SF-' || sfo.account_id) as distributor_code,
+            sfo.account_id,
             sfo.distributor_name,
-            sfo.account_id as sfdc_distributor_account_id,
-            COALESCE(d.total_retailers, 0) as total_retailers,
-            sfo.qty_ordered as total_qty_ordered,
-            sfo.order_value as total_order_value,
-            sfo.order_count as total_orders,
-            COALESCE(vd.qty_depleted, 0) as total_qty_depleted,
-            COALESCE(vd.stores_reached, 0) as unique_stores,
-            COALESCE(vd.transaction_count, 0) as depletion_transactions,
-            COALESCE(vd.weekly_depletion_rate, 0) as weekly_depletion_rate,
-            CASE WHEN d.distributor_code IS NOT NULL THEN TRUE ELSE FALSE END as has_vip_match
+            sfo.qty_ordered,
+            sfo.order_value,
+            sfo.order_count,
+            STRING_AGG(DISTINCT vtf.distributor_code, ', ') as vip_codes,
+            SUM(vd.qty_depleted) as total_qty_depleted,
+            SUM(vd.stores_reached) as unique_stores,
+            SUM(vd.transaction_count) as depletion_transactions,
+            SUM(vd.weekly_depletion_rate) as weekly_depletion_rate,
+            MAX(vtf.total_retailers) as total_retailers,
+            CASE WHEN COUNT(vtf.distributor_code) > 0 THEN TRUE ELSE FALSE END as has_vip_match
         FROM sf_orders sfo
-        LEFT JOIN distributors d ON sfo.account_id = d.sfdc_distributor_account_id
-        LEFT JOIN vip_depletion vd ON d.distributor_code = vd.distributor_code
+        LEFT JOIN vip_to_sf vtf
+            ON sfo.account_id = vtf.sf_child_id  -- Direct match
+            OR sfo.account_id = vtf.sf_parent_id  -- Parent rollup
+        LEFT JOIN vip_depletion vd
+            ON vtf.distributor_code = vd.distributor_code
+        GROUP BY sfo.account_id, sfo.distributor_name, sfo.qty_ordered, sfo.order_value, sfo.order_count
+    ),
+
+    -- VIP codes that are already matched to SF orders (via direct or parent)
+    matched_vip_codes AS (
+        SELECT DISTINCT vtf.distributor_code
+        FROM sf_orders sfo
+        JOIN vip_to_sf vtf
+            ON sfo.account_id = vtf.sf_child_id
+            OR sfo.account_id = vtf.sf_parent_id
     ),
 
     -- VIP-only distributors (have depletion but no SF orders in period)
     vip_only AS (
         SELECT
-            d.distributor_code,
-            d.distributor_name,
-            d.sfdc_distributor_account_id,
-            d.total_retailers,
-            0 as total_qty_ordered,
-            0 as total_order_value,
-            0 as total_orders,
+            vtf.distributor_code as account_id,
+            vtf.vip_dist_name as distributor_name,
+            0 as qty_ordered,
+            0.0 as order_value,
+            0 as order_count,
+            vtf.distributor_code as vip_codes,
             vd.qty_depleted as total_qty_depleted,
             vd.stores_reached as unique_stores,
             vd.transaction_count as depletion_transactions,
             vd.weekly_depletion_rate,
+            vtf.total_retailers,
             TRUE as has_vip_match
-        FROM distributors d
-        JOIN vip_depletion vd ON d.distributor_code = vd.distributor_code
-        WHERE NOT EXISTS (
-            SELECT 1 FROM sf_with_vip sv
-            WHERE sv.distributor_code = d.distributor_code
-        )
+        FROM vip_to_sf vtf
+        JOIN vip_depletion vd ON vtf.distributor_code = vd.distributor_code
+        LEFT JOIN matched_vip_codes mvc ON vtf.distributor_code = mvc.distributor_code
+        WHERE mvc.distributor_code IS NULL
     ),
 
     -- Combine both sources
     combined AS (
-        SELECT * FROM sf_with_vip
+        SELECT * FROM sf_with_rollup
         UNION ALL
         SELECT * FROM vip_only
     )
 
     SELECT
-        distributor_code,
+        account_id as distributor_code,
         distributor_name,
-        sfdc_distributor_account_id,
-        total_retailers,
-        total_qty_ordered,
-        total_order_value,
-        total_orders,
-        total_qty_depleted,
-        unique_stores,
-        depletion_transactions,
-        weekly_depletion_rate,
+        account_id as sfdc_distributor_account_id,
+        COALESCE(total_retailers, 0) as total_retailers,
+        qty_ordered as total_qty_ordered,
+        order_value as total_order_value,
+        order_count as total_orders,
+        COALESCE(total_qty_depleted, 0) as total_qty_depleted,
+        COALESCE(unique_stores, 0) as unique_stores,
+        COALESCE(depletion_transactions, 0) as depletion_transactions,
+        COALESCE(weekly_depletion_rate, 0) as weekly_depletion_rate,
         has_vip_match,
+        vip_codes,
 
         -- Order/Depletion Ratio
         CASE
-            WHEN total_qty_depleted > 0
-            THEN ROUND(total_qty_ordered * 1.0 / total_qty_depleted, 2)
+            WHEN COALESCE(total_qty_depleted, 0) > 0
+            THEN ROUND(qty_ordered * 1.0 / total_qty_depleted, 2)
             ELSE NULL
         END as order_depletion_ratio,
 
         -- Weeks of Inventory
         CASE
-            WHEN weekly_depletion_rate > 0
-            THEN ROUND(total_qty_ordered / weekly_depletion_rate, 1)
+            WHEN COALESCE(weekly_depletion_rate, 0) > 0
+            THEN ROUND(qty_ordered / weekly_depletion_rate, 1)
             ELSE NULL
         END as weeks_of_inventory,
 
         -- Inventory status
         CASE
-            WHEN total_qty_depleted = 0 AND total_qty_ordered > 0 THEN 'No Depletion Data'
-            WHEN total_qty_ordered = 0 AND total_qty_depleted > 0 THEN 'No Recent Orders'
-            WHEN total_qty_depleted > 0 AND (total_qty_ordered * 1.0 / total_qty_depleted) > 1.3 THEN 'Overstock'
-            WHEN total_qty_depleted > 0 AND (total_qty_ordered * 1.0 / total_qty_depleted) < 0.7 THEN 'Understock'
-            WHEN total_qty_depleted > 0 THEN 'Balanced'
+            WHEN COALESCE(total_qty_depleted, 0) = 0 AND qty_ordered > 0 THEN 'No Depletion Data'
+            WHEN qty_ordered = 0 AND COALESCE(total_qty_depleted, 0) > 0 THEN 'No Recent Orders'
+            WHEN COALESCE(total_qty_depleted, 0) > 0 AND (qty_ordered * 1.0 / total_qty_depleted) > 1.3 THEN 'Overstock'
+            WHEN COALESCE(total_qty_depleted, 0) > 0 AND (qty_ordered * 1.0 / total_qty_depleted) < 0.7 THEN 'Understock'
+            WHEN COALESCE(total_qty_depleted, 0) > 0 THEN 'Balanced'
             ELSE 'No Data'
         END as inventory_status
 
     FROM combined
-    ORDER BY total_order_value DESC
+    ORDER BY order_value DESC
     """
     return client.query(query).to_dataframe()
 
@@ -768,7 +786,7 @@ def main():
     st.markdown('<p class="section-header">Distributor Inventory Summary</p>', unsafe_allow_html=True)
 
     display_df = filtered_df[[
-        'distributor_name', 'total_qty_ordered', 'total_qty_depleted',
+        'distributor_name', 'vip_codes', 'total_qty_ordered', 'total_qty_depleted',
         'order_depletion_ratio', 'weeks_of_inventory', 'inventory_status',
         'total_order_value', 'has_vip_match'
     ]].copy()
@@ -777,7 +795,8 @@ def main():
     display_df['weeks_of_inventory'] = display_df['weeks_of_inventory'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "N/A")
     display_df['order_depletion_ratio'] = display_df['order_depletion_ratio'].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
     display_df['has_vip_match'] = display_df['has_vip_match'].apply(lambda x: "Yes" if x else "No")
-    display_df.columns = ['Distributor', 'Qty Ordered', 'Qty Depleted', 'O/D Ratio', 'Weeks Inv', 'Status', 'Order Value', 'VIP Match']
+    display_df['vip_codes'] = display_df['vip_codes'].fillna('-')
+    display_df.columns = ['Distributor', 'VIP Codes', 'Qty Ordered', 'Qty Depleted', 'O/D Ratio', 'Weeks Inv', 'Status', 'Order Value', 'VIP Match']
 
     st.dataframe(
         display_df.sort_values('Qty Ordered', ascending=False),
