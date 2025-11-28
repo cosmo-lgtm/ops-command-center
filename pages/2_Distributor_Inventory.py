@@ -480,6 +480,43 @@ def load_product_level_data(distributor_codes: list = None, lookback_days: int =
 
 
 @st.cache_data(ttl=300)
+def load_state_depletion_data(lookback_days: int = 90):
+    """Load depletion data aggregated by state for US map visualization."""
+    client = get_bq_client()
+
+    query = f"""
+    WITH state_depletion AS (
+        SELECT
+            d.state,
+            d.distributor_code,
+            CAST(d.total_retailers AS INT64) as total_retailers,
+            SUM(SAFE_CAST(sl.Qty AS INT64)) as qty_depleted,
+            COUNT(DISTINCT sl.Acct_Code) as stores_reached
+        FROM `artful-logic-475116-p1.raw_vip.sales_lite` sl
+        JOIN `artful-logic-475116-p1.staging_vip.distributor_fact_sheet_v2` d
+            ON sl.Dist_Code = d.distributor_code
+        WHERE SAFE_CAST(sl.Qty AS INT64) > 0
+            AND SAFE.PARSE_DATE('%Y%m%d', sl.Invoice_Date) >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
+            AND d.state IS NOT NULL
+            AND LENGTH(d.state) = 2
+        GROUP BY d.state, d.distributor_code, d.total_retailers
+    )
+    SELECT
+        state,
+        COUNT(DISTINCT distributor_code) as distributor_count,
+        SUM(qty_depleted) as total_depleted,
+        SUM(stores_reached) as total_doors,
+        SUM(total_retailers) as total_pods,
+        ROUND(SUM(total_retailers) * 1.0 / COUNT(DISTINCT distributor_code), 0) as avg_pods_per_dist,
+        ROUND(SUM(qty_depleted) / ({lookback_days} / 7.0), 0) as weekly_rate
+    FROM state_depletion
+    GROUP BY state
+    ORDER BY total_depleted DESC
+    """
+    return client.query(query).to_dataframe()
+
+
+@st.cache_data(ttl=300)
 def load_trend_data(lookback_weeks: int = 12):
     """Load weekly trend data for orders and depletion."""
     client = get_bq_client()
@@ -860,24 +897,123 @@ def main():
                 apply_dark_theme(fig, height=400, showlegend=False)
                 st.plotly_chart(fig, use_container_width=True)
 
-            # Product detail table
-            st.markdown("**Product Depletion Details**")
-            product_display = product_df[[
-                'distributor_name', 'Item_Code', 'product_name',
-                'qty_depleted', 'weekly_depletion_rate', 'stores_reached', 'velocity_status'
-            ]].copy()
-            product_display.columns = ['Distributor', 'Item Code', 'Product', 'Qty Depleted', 'Weekly Rate', 'Stores', 'Velocity']
-
-            st.dataframe(
-                product_display.sort_values('Qty Depleted', ascending=False).head(100),
-                use_container_width=True,
-                hide_index=True,
-                height=400
-            )
         else:
             st.info("No product-level data available for selected filters")
     except Exception as e:
         st.warning(f"Could not load product-level data: {e}")
+
+    # US State Depletion Heatmap
+    st.markdown('<p class="section-header">Depletion by State</p>', unsafe_allow_html=True)
+
+    try:
+        state_df = load_state_depletion_data(lookback_days=lookback_days)
+
+        if not state_df.empty:
+            # Create choropleth map
+            fig = go.Figure(data=go.Choropleth(
+                locations=state_df['state'],
+                z=state_df['total_depleted'],
+                locationmode='USA-states',
+                colorscale=[
+                    [0, '#1a1a2e'],
+                    [0.2, '#16213e'],
+                    [0.4, '#0f3460'],
+                    [0.6, '#00a3cc'],
+                    [0.8, '#00d4aa'],
+                    [1, '#64ffda']
+                ],
+                colorbar=dict(
+                    title=dict(text='Units Depleted', font=dict(color='#ccd6f6')),
+                    tickfont=dict(color='#8892b0'),
+                    bgcolor='rgba(0,0,0,0)',
+                    bordercolor='rgba(255,255,255,0.1)'
+                ),
+                hovertemplate='<b>%{location}</b><br>' +
+                              'Depleted: %{z:,.0f} units<br>' +
+                              '<extra></extra>',
+                marker_line_color='rgba(255,255,255,0.2)',
+                marker_line_width=0.5
+            ))
+
+            fig.update_layout(
+                geo=dict(
+                    scope='usa',
+                    bgcolor='rgba(0,0,0,0)',
+                    lakecolor='rgba(0,0,0,0)',
+                    landcolor='#1a1a2e',
+                    showlakes=False,
+                    showland=True,
+                    subunitcolor='rgba(255,255,255,0.1)'
+                ),
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                margin=dict(l=0, r=0, t=10, b=0),
+                height=450
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
+            # State summary table below the map
+            col1, col2 = st.columns([2, 1])
+
+            with col1:
+                st.markdown("**Top States by Depletion**")
+                state_display = state_df[['state', 'distributor_count', 'total_depleted', 'total_doors', 'total_pods', 'avg_pods_per_dist', 'weekly_rate']].head(15).copy()
+                state_display['total_depleted'] = state_display['total_depleted'].apply(lambda x: f"{x:,.0f}")
+                state_display['weekly_rate'] = state_display['weekly_rate'].apply(lambda x: f"{x:,.0f}")
+                state_display['total_doors'] = state_display['total_doors'].apply(lambda x: f"{x:,.0f}")
+                state_display['total_pods'] = state_display['total_pods'].apply(lambda x: f"{x:,.0f}")
+                state_display['avg_pods_per_dist'] = state_display['avg_pods_per_dist'].apply(lambda x: f"{x:,.0f}")
+                state_display.columns = ['State', 'Distributors', 'Total Depleted', 'Doors', 'PODs', 'Avg PODs/Dist', 'Weekly Rate']
+
+                st.dataframe(
+                    state_display,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=350
+                )
+
+            with col2:
+                # State coverage stats
+                total_states = len(state_df)
+                total_depleted = state_df['total_depleted'].sum()
+                total_doors = state_df['total_doors'].sum()
+                total_pods = state_df['total_pods'].sum()
+                avg_pods = total_pods / len(state_df) if len(state_df) > 0 else 0
+                top_state = state_df.iloc[0]['state'] if len(state_df) > 0 else 'N/A'
+                top_state_pct = (state_df.iloc[0]['total_depleted'] / total_depleted * 100) if total_depleted > 0 else 0
+
+                st.markdown(f"""
+                <div class="metric-card">
+                    <p class="metric-value">{total_states}</p>
+                    <p class="metric-label">States with Depletion</p>
+                </div>
+                """, unsafe_allow_html=True)
+
+                st.markdown(f"""
+                <div class="metric-card" style="margin-top: 16px;">
+                    <p class="metric-value">{total_doors:,.0f}</p>
+                    <p class="metric-label">Total Doors (Active)</p>
+                </div>
+                """, unsafe_allow_html=True)
+
+                st.markdown(f"""
+                <div class="metric-card" style="margin-top: 16px;">
+                    <p class="metric-value">{total_pods:,.0f}</p>
+                    <p class="metric-label">Total PODs</p>
+                </div>
+                """, unsafe_allow_html=True)
+
+                st.markdown(f"""
+                <div class="metric-card" style="margin-top: 16px;">
+                    <p class="metric-value">{top_state}</p>
+                    <p class="metric-label">Top State ({top_state_pct:.1f}%)</p>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.info("No state-level depletion data available")
+    except Exception as e:
+        st.warning(f"Could not load state depletion data: {e}")
 
     # Footer
     st.markdown(f"""
