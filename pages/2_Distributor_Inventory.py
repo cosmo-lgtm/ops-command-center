@@ -768,7 +768,6 @@ def main():
         return
 
     # Filter Section
-    st.markdown('<div class="filter-container">', unsafe_allow_html=True)
     col1, col2, col3 = st.columns([3, 1, 1])
 
     with col1:
@@ -796,8 +795,6 @@ def main():
             index=2,
             format_func=lambda x: f"{x} weeks"
         )
-
-    st.markdown('</div>', unsafe_allow_html=True)
 
     # Filter the data based on selection
     if "All Distributors" not in selected_distributors and len(selected_distributors) > 0:
