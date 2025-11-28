@@ -127,7 +127,7 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # Dashboard cards in a 2x2 grid
+    # Dashboard cards in a grid
     col1, col2 = st.columns(2)
 
     with col1:
@@ -151,6 +151,18 @@ def main():
                 B2B order fulfillment analytics - shipping costs, carrier performance, and delivery metrics.
                 <br><br>
                 <strong>Key Metrics:</strong> Fulfillment Rate, Days to Ship, Shipping Cost MTD
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("""
+        <div class="dashboard-card">
+            <div class="card-icon">🌿</div>
+            <div class="card-title">Hemp Advocacy</div>
+            <div class="card-description">
+                Hemp industry economic impact data for policymaker advocacy - market growth, jobs, tax revenue.
+                <br><br>
+                <strong>Key Metrics:</strong> $445M Production, 440K Jobs, 28 Legal States
             </div>
         </div>
         """, unsafe_allow_html=True)
