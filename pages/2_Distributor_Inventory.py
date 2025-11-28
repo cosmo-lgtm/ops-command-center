@@ -14,6 +14,13 @@ import plotly.graph_objects as go
 # Dark mode custom CSS
 st.markdown("""
 <style>
+    /* Force wide layout */
+    .block-container {
+        max-width: 100% !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+    }
+
     /* Main background */
     .stApp {
         background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%);

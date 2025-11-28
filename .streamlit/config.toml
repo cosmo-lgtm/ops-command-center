@@ -12,3 +12,9 @@ enableXsrfProtection = true
 
 [browser]
 gatherUsageStats = false
+
+[runner]
+fastReruns = true
+
+[ui]
+hideTopBar = false
