@@ -226,8 +226,15 @@ def apply_dark_theme(fig, height=350, **kwargs):
             **kwargs.get('yaxis', {})
         }
     }
+    # Handle secondary y-axis if provided
+    if 'yaxis2' in kwargs:
+        layout_args['yaxis2'] = {
+            'gridcolor': 'rgba(255,255,255,0.1)',
+            'linecolor': 'rgba(255,255,255,0.1)',
+            **kwargs.get('yaxis2', {})
+        }
     for k, v in kwargs.items():
-        if k not in ['xaxis', 'yaxis', 'margin']:
+        if k not in ['xaxis', 'yaxis', 'yaxis2', 'margin']:
             layout_args[k] = v
     fig.update_layout(**layout_args)
     return fig
