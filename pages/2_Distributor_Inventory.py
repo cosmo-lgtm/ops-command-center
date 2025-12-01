@@ -1349,28 +1349,19 @@ def main():
         state_df = load_state_depletion_data(lookback_days=lookback_days)
 
         if not state_df.empty:
-            # Hex tile grid positions for US states (row, col)
-            # Proper hex grid layout - odd rows offset by 0.5
-            # Based on standard US hex tile map template
+            # Hex tile grid positions for US states
+            # Standard NPR/visualization hex tile layout (col, row format)
+            # Source: https://blog.apps.npr.org/2015/05/11/hex-tile-maps.html
             hex_positions = {
-                # Row 0
-                'AK': (0, 0), 'ME': (0, 11),
-                # Row 1 (offset +0.5)
-                'VT': (1, 9.5), 'NH': (1, 10.5),
-                # Row 2
-                'WA': (2, 1), 'MT': (2, 2), 'ND': (2, 3), 'MN': (2, 4), 'WI': (2, 5), 'MI': (2, 7), 'NY': (2, 8), 'MA': (2, 9), 'RI': (2, 10),
-                # Row 3 (offset +0.5)
-                'ID': (3, 1.5), 'WY': (3, 2.5), 'SD': (3, 3.5), 'IA': (3, 4.5), 'IL': (3, 5.5), 'IN': (3, 6.5), 'OH': (3, 7.5), 'PA': (3, 8.5), 'NJ': (3, 9.5), 'CT': (3, 10.5),
-                # Row 4
-                'OR': (4, 1), 'NV': (4, 2), 'CO': (4, 3), 'NE': (4, 4), 'MO': (4, 5), 'KY': (4, 6), 'WV': (4, 7), 'MD': (4, 8), 'DE': (4, 9), 'DC': (4, 11),
-                # Row 5 (offset +0.5)
-                'CA': (5, 1.5), 'AZ': (5, 2.5), 'UT': (5, 3.5), 'KS': (5, 4.5), 'AR': (5, 5.5), 'TN': (5, 6.5), 'VA': (5, 7.5), 'NC': (5, 8.5),
-                # Row 6
-                'NM': (6, 3), 'OK': (6, 4), 'LA': (6, 5), 'MS': (6, 6), 'AL': (6, 7), 'SC': (6, 8), 'GA': (6, 9),
-                # Row 7 (offset +0.5)
-                'TX': (7, 4.5), 'FL': (7, 9.5),
-                # Row 8
-                'HI': (8, 1),
+                'ME': (11, 0),
+                'VT': (10, 1), 'NH': (11, 1),
+                'WA': (1, 2), 'MT': (2, 2), 'ND': (3, 2), 'MN': (4, 2), 'WI': (5, 2), 'MI': (7, 2), 'NY': (9, 2), 'MA': (10, 2), 'RI': (11, 2),
+                'ID': (1, 3), 'WY': (2, 3), 'SD': (3, 3), 'IA': (4, 3), 'IL': (5, 3), 'IN': (6, 3), 'OH': (7, 3), 'PA': (8, 3), 'NJ': (9, 3), 'CT': (10, 3),
+                'OR': (0, 4), 'NV': (1, 4), 'CO': (2, 4), 'NE': (3, 4), 'MO': (4, 4), 'KY': (5, 4), 'WV': (6, 4), 'VA': (7, 4), 'MD': (8, 4), 'DE': (9, 4),
+                'CA': (0, 5), 'UT': (1, 5), 'AZ': (2, 5), 'KS': (3, 5), 'AR': (4, 5), 'TN': (5, 5), 'NC': (6, 5), 'SC': (7, 5), 'DC': (9, 5),
+                'NM': (2, 6), 'OK': (3, 6), 'LA': (4, 6), 'MS': (5, 6), 'AL': (6, 6), 'GA': (7, 6),
+                'TX': (3, 7), 'FL': (7, 7),
+                'AK': (0, 8), 'HI': (1, 8),
             }
 
             # Create data for hex map - show ALL states, zeros for those without data
@@ -1380,13 +1371,13 @@ def main():
             # Create lookup from state data
             state_lookup = state_df.set_index('state').to_dict('index') if not state_df.empty else {}
 
-            # Add ALL states from hex_positions
-            for state, (grid_row, grid_col) in hex_positions.items():
+            # Add ALL states from hex_positions (col, row format)
+            for state, (grid_col, grid_row) in hex_positions.items():
                 if state in state_lookup:
                     hex_data.append({
                         'state': state,
-                        'row': grid_row,
                         'col': grid_col,
+                        'row': grid_row,
                         'depleted': state_lookup[state]['total_depleted'],
                         'doors': state_lookup[state]['total_doors'],
                         'pods': state_lookup[state]['total_pods']
@@ -1395,8 +1386,8 @@ def main():
                     # State with no data - show as zero
                     hex_data.append({
                         'state': state,
-                        'row': grid_row,
                         'col': grid_col,
+                        'row': grid_row,
                         'depleted': 0,
                         'doors': 0,
                         'pods': 0
