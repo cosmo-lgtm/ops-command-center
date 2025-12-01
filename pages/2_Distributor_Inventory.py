@@ -788,9 +788,11 @@ def main():
     try:
         distributors_df = load_distributors()
         inventory_df = load_inventory_data(lookback_days=lookback_days)
-        # Trend data uses lookback_days converted to weeks (minimum 12 for forecasting)
-        lookback_weeks = max(12, lookback_days // 7)
+        # Trend data: convert days to weeks, minimum 12 for forecasting (loaded separately)
+        lookback_weeks = lookback_days // 7
         trend_df = load_trend_data(lookback_weeks=lookback_weeks)
+        # Always load 12 weeks for forecast model regardless of display lookback
+        forecast_trend_df = load_trend_data(lookback_weeks=12) if lookback_weeks < 12 else trend_df
     except Exception as e:
         st.error(f"Error loading data: {e}")
         return
@@ -1014,8 +1016,8 @@ def main():
     st.markdown('<p class="section-header">📈 3-Month Forecast</p>', unsafe_allow_html=True)
     st.markdown('<p style="color: #8892b0; font-size: 14px; margin-top: -10px;">Ensemble forecast using Linear Regression, Exponential Smoothing, and Moving Average with Trend</p>', unsafe_allow_html=True)
 
-    if not trend_df.empty:
-        forecast_result = generate_ensemble_forecast(trend_df, forecast_weeks=12)
+    if not forecast_trend_df.empty:
+        forecast_result = generate_ensemble_forecast(forecast_trend_df, forecast_weeks=12)
 
         if forecast_result is not None:
             forecast_df, historical_df = forecast_result
