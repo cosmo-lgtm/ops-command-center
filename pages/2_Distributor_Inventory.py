@@ -1342,117 +1342,50 @@ def main():
     except Exception as e:
         st.warning(f"Could not load product-level data: {e}")
 
-    # US State Depletion Hex Map
+    # US State Depletion Map
     st.markdown('<p class="section-header">Depletion by State</p>', unsafe_allow_html=True)
 
     try:
         state_df = load_state_depletion_data(lookback_days=lookback_days)
 
         if not state_df.empty:
-            # Hex tile grid positions for US states
-            # Standard NPR/visualization hex tile layout (col, row format)
-            # Source: https://blog.apps.npr.org/2015/05/11/hex-tile-maps.html
-            hex_positions = {
-                'ME': (11, 0),
-                'VT': (10, 1), 'NH': (11, 1),
-                'WA': (1, 2), 'MT': (2, 2), 'ND': (3, 2), 'MN': (4, 2), 'WI': (5, 2), 'MI': (7, 2), 'NY': (9, 2), 'MA': (10, 2), 'RI': (11, 2),
-                'ID': (1, 3), 'WY': (2, 3), 'SD': (3, 3), 'IA': (4, 3), 'IL': (5, 3), 'IN': (6, 3), 'OH': (7, 3), 'PA': (8, 3), 'NJ': (9, 3), 'CT': (10, 3),
-                'OR': (0, 4), 'NV': (1, 4), 'CO': (2, 4), 'NE': (3, 4), 'MO': (4, 4), 'KY': (5, 4), 'WV': (6, 4), 'VA': (7, 4), 'MD': (8, 4), 'DE': (9, 4),
-                'CA': (0, 5), 'UT': (1, 5), 'AZ': (2, 5), 'KS': (3, 5), 'AR': (4, 5), 'TN': (5, 5), 'NC': (6, 5), 'SC': (7, 5), 'DC': (9, 5),
-                'NM': (2, 6), 'OK': (3, 6), 'LA': (4, 6), 'MS': (5, 6), 'AL': (6, 6), 'GA': (7, 6),
-                'TX': (3, 7), 'FL': (7, 7),
-                'AK': (0, 8), 'HI': (1, 8),
-            }
-
-            # Create data for hex map - show ALL states, zeros for those without data
-            hex_data = []
-            max_depleted = state_df['total_depleted'].max() if not state_df.empty else 1
-
-            # Create lookup from state data
-            state_lookup = state_df.set_index('state').to_dict('index') if not state_df.empty else {}
-
-            # Add ALL states from hex_positions (col, row format)
-            for state, (grid_col, grid_row) in hex_positions.items():
-                if state in state_lookup:
-                    hex_data.append({
-                        'state': state,
-                        'col': grid_col,
-                        'row': grid_row,
-                        'depleted': state_lookup[state]['total_depleted'],
-                        'doors': state_lookup[state]['total_doors'],
-                        'pods': state_lookup[state]['total_pods']
-                    })
-                else:
-                    # State with no data - show as zero
-                    hex_data.append({
-                        'state': state,
-                        'col': grid_col,
-                        'row': grid_row,
-                        'depleted': 0,
-                        'doors': 0,
-                        'pods': 0
-                    })
-
-            hex_df = pd.DataFrame(hex_data)
-
-            # Create hex map using scatter plot with markers
-            fig = go.Figure()
-
-            # Normalize for color scale
-            hex_df['color_val'] = hex_df['depleted'] / max_depleted if max_depleted > 0 else 0
-
-            # Add hexagons as markers - use larger spacing factor
-            fig.add_trace(go.Scatter(
-                x=hex_df['col'],  # Use raw column positions
-                y=-hex_df['row'],  # Negative to flip y-axis (row 0 at top)
-                mode='markers+text',
-                marker=dict(
-                    size=35,  # Smaller markers
-                    symbol='hexagon',
-                    color=hex_df['depleted'],
-                    colorscale=[
-                        [0, '#1a1a2e'],
-                        [0.2, '#0f3460'],
-                        [0.5, '#00a3cc'],
-                        [0.8, '#00d4aa'],
-                        [1, '#64ffda']
-                    ],
-                    colorbar=dict(
-                        title=dict(text='Units', font=dict(color='#ccd6f6', size=12)),
-                        tickfont=dict(color='#8892b0', size=10),
-                        thickness=15,
-                        len=0.7
-                    ),
-                    line=dict(color='rgba(255,255,255,0.3)', width=1)
+            # Create choropleth map
+            fig = go.Figure(data=go.Choropleth(
+                locations=state_df['state'],
+                z=state_df['total_depleted'],
+                locationmode='USA-states',
+                colorscale=[
+                    [0, '#1a1a2e'],
+                    [0.2, '#0f3460'],
+                    [0.5, '#00a3cc'],
+                    [0.8, '#00d4aa'],
+                    [1, '#64ffda']
+                ],
+                colorbar=dict(
+                    title=dict(text='Units', font=dict(color='#ccd6f6', size=12)),
+                    tickfont=dict(color='#8892b0', size=10),
+                    thickness=15,
+                    len=0.7
                 ),
-                text=hex_df.apply(lambda r: f"{r['state']}<br>{r['depleted']/1000:.0f}K" if r['depleted'] >= 1000 else f"{r['state']}<br>{int(r['depleted'])}", axis=1),
-                textposition='middle center',
-                textfont=dict(color='white', size=9),
-                hovertemplate='<b>%{customdata[0]}</b><br>' +
-                              'Depleted: %{customdata[1]:,.0f}<br>' +
-                              'Doors: %{customdata[2]:,.0f}<br>' +
-                              'PODs: %{customdata[3]:,.0f}<extra></extra>',
-                customdata=hex_df[['state', 'depleted', 'doors', 'pods']].values
+                hovertemplate='<b>%{location}</b><br>' +
+                              'Depleted: %{z:,.0f}<extra></extra>',
+                marker_line_color='rgba(255,255,255,0.3)',
+                marker_line_width=0.5
             ))
 
             fig.update_layout(
+                geo=dict(
+                    scope='usa',
+                    bgcolor='rgba(0,0,0,0)',
+                    lakecolor='rgba(0,0,0,0)',
+                    landcolor='#1a1a2e',
+                    showlakes=False,
+                    showland=True
+                ),
                 paper_bgcolor='rgba(0,0,0,0)',
                 plot_bgcolor='rgba(0,0,0,0)',
-                margin=dict(l=10, r=80, t=10, b=10),
-                height=400,
-                xaxis=dict(
-                    visible=False,
-                    range=[-1, 13],  # Fixed range for consistent sizing
-                    fixedrange=True
-                ),
-                yaxis=dict(
-                    visible=False,
-                    scaleanchor='x',
-                    scaleratio=1,
-                    range=[-10, 1],  # Fixed range (negative because we flip)
-                    fixedrange=True
-                ),
-                showlegend=False
+                margin=dict(l=0, r=0, t=0, b=0),
+                height=350
             )
 
             st.plotly_chart(fig, use_container_width=True)
