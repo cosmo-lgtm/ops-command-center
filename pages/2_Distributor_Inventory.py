@@ -807,15 +807,23 @@ def main():
     total_qty_ordered = filtered_df['total_qty_ordered'].sum()
     total_qty_depleted = filtered_df['total_qty_depleted'].sum()
 
-    # Status counts
-    overstock_count = len(filtered_df[filtered_df['inventory_status'] == 'Overstock'])
-    understock_count = len(filtered_df[filtered_df['inventory_status'] == 'Understock'])
-    balanced_count = len(filtered_df[filtered_df['inventory_status'] == 'Balanced'])
-    no_depletion_count = len(filtered_df[filtered_df['inventory_status'] == 'No Depletion Data'])
-    no_orders_count = len(filtered_df[filtered_df['inventory_status'] == 'No Recent Orders'])
-    vip_matched = len(filtered_df[filtered_df['has_vip_match'] == True])
+    # Separate distributors with and without depletion data
+    has_depletion_df = filtered_df[
+        (filtered_df['total_qty_depleted'].notna()) &
+        (filtered_df['total_qty_depleted'] > 0)
+    ]
 
-    avg_weeks = filtered_df[filtered_df['weeks_of_inventory'].notna() & (filtered_df['weeks_of_inventory'] > 0)]['weeks_of_inventory'].mean()
+    # Status counts based on weeks_of_inventory (consistent with chart)
+    # <4 weeks = Understock, 4-12 weeks = Balanced, >12 weeks = Overstock
+    overstock_count = len(has_depletion_df[has_depletion_df['weeks_of_inventory'] > 12])
+    understock_count = len(has_depletion_df[has_depletion_df['weeks_of_inventory'] < 4])
+    balanced_count = len(has_depletion_df[
+        (has_depletion_df['weeks_of_inventory'] >= 4) &
+        (has_depletion_df['weeks_of_inventory'] <= 12)
+    ])
+    no_depletion_count = len(filtered_df) - len(has_depletion_df)
+
+    avg_weeks = has_depletion_df[has_depletion_df['weeks_of_inventory'].notna() & (has_depletion_df['weeks_of_inventory'] > 0)]['weeks_of_inventory'].mean()
 
     # KPI Cards Row
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -833,18 +841,20 @@ def main():
         ), unsafe_allow_html=True)
 
     with col3:
-        overstock_pct = round(100 * overstock_count / max(total_distributors, 1), 1)
+        # Percentage based on distributors WITH depletion data (those we can classify)
+        has_depletion_total = len(has_depletion_df)
+        overstock_pct = round(100 * overstock_count / max(has_depletion_total, 1), 1)
         st.markdown(render_metric_card(
             f"{overstock_count} ({overstock_pct}%)",
-            "Overstocked",
+            "Overstocked (>12 wks)",
             card_type="warning"
         ), unsafe_allow_html=True)
 
     with col4:
-        understock_pct = round(100 * understock_count / max(total_distributors, 1), 1)
+        understock_pct = round(100 * understock_count / max(has_depletion_total, 1), 1)
         st.markdown(render_metric_card(
             f"{understock_count} ({understock_pct}%)",
-            "Understocked",
+            "Understocked (<4 wks)",
             card_type="danger"
         ), unsafe_allow_html=True)
 
@@ -922,24 +932,12 @@ def main():
     with col2:
         st.markdown('<p class="section-header">Distributor Inventory Health</p>', unsafe_allow_html=True)
 
-        # Count distributors with and without depletion data
-        has_depletion = filtered_df[
-            (filtered_df['total_qty_depleted'].notna()) &
-            (filtered_df['total_qty_depleted'] > 0)
-        ]
-        no_depletion = filtered_df[
-            (filtered_df['total_qty_depleted'].isna()) |
-            (filtered_df['total_qty_depleted'] == 0)
-        ]
-
-        # For those with depletion, categorize by weeks of inventory
-        understock_count = len(has_depletion[has_depletion['weeks_of_inventory'] < 4])
-        balanced_count_chart = len(has_depletion[
-            (has_depletion['weeks_of_inventory'] >= 4) &
-            (has_depletion['weeks_of_inventory'] <= 12)
-        ])
-        overstock_count_chart = len(has_depletion[has_depletion['weeks_of_inventory'] > 12])
-        no_depletion_count_chart = len(no_depletion)
+        # Reuse the counts calculated above for consistency
+        # understock_count, balanced_count, overstock_count already calculated from has_depletion_df
+        understock_count_chart = understock_count
+        balanced_count_chart = balanced_count
+        overstock_count_chart = overstock_count
+        no_depletion_count_chart = no_depletion_count
 
         fig = go.Figure()
 
@@ -947,9 +945,9 @@ def main():
         fig.add_trace(go.Bar(
             name='Understock (<4 wks)',
             x=['With Depletion'],
-            y=[understock_count],
+            y=[understock_count_chart],
             marker_color=COLORS['danger'],
-            text=[understock_count] if understock_count > 0 else None,
+            text=[understock_count_chart] if understock_count_chart > 0 else None,
             textposition='inside',
             textfont=dict(color='white', size=14)
         ))
