@@ -504,28 +504,29 @@ def load_state_depletion_data(lookback_days: int = 90):
 
     query = f"""
     -- Uses cleaned/deduplicated sales data from analytics.vip_sales_clean
+    -- POD = Points of Distribution = unique (door, SKU) combinations
     WITH state_depletion AS (
         SELECT
             d.state,
             d.distributor_code,
-            CAST(d.total_retailers AS INT64) as total_retailers,
             SUM(sc.quantity) as qty_depleted,
-            COUNT(DISTINCT sc.account_code) as stores_reached
+            COUNT(DISTINCT sc.account_code) as stores_reached,
+            COUNT(DISTINCT CONCAT(sc.account_code, '|', sc.product_code)) as pod_count
         FROM `artful-logic-475116-p1.analytics.vip_sales_clean` sc
         JOIN `artful-logic-475116-p1.staging_vip.distributor_fact_sheet_v2` d
             ON sc.distributor_code = d.distributor_code
         WHERE sc.transaction_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
             AND d.state IS NOT NULL
             AND LENGTH(d.state) = 2
-        GROUP BY d.state, d.distributor_code, d.total_retailers
+        GROUP BY d.state, d.distributor_code
     )
     SELECT
         state,
         COUNT(DISTINCT distributor_code) as distributor_count,
         SUM(qty_depleted) as total_depleted,
         SUM(stores_reached) as total_doors,
-        SUM(total_retailers) as total_pods,
-        ROUND(SUM(total_retailers) * 1.0 / COUNT(DISTINCT distributor_code), 0) as avg_pods_per_dist,
+        SUM(pod_count) as total_pods,
+        ROUND(SUM(pod_count) * 1.0 / NULLIF(SUM(stores_reached), 0), 1) as avg_pods_per_dist,
         ROUND(SUM(qty_depleted) / ({lookback_days} / 7.0), 0) as weekly_rate
     FROM state_depletion
     GROUP BY state
@@ -1438,7 +1439,7 @@ def main():
             state_display['total_doors'] = state_display['total_doors'].apply(lambda x: f"{x:,.0f}")
             state_display['total_pods'] = state_display['total_pods'].apply(lambda x: f"{x:,.0f}")
             state_display['avg_pods_per_dist'] = state_display['avg_pods_per_dist'].apply(lambda x: f"{x:,.0f}")
-            state_display.columns = ['State', 'Distributors', 'Total Depleted', 'Doors', 'PODs', 'Avg PODs/Dist', 'Weekly Rate']
+            state_display.columns = ['State', 'Distributors', 'Total Depleted', 'Doors', 'PODs', 'SKUs/Door', 'Weekly Rate']
 
             st.dataframe(
                 state_display,
