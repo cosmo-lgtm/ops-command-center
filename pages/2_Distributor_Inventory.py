@@ -287,6 +287,7 @@ def load_inventory_data(lookback_days: int = 90):
     query = f"""
     WITH
     -- Salesforce orders to distributors (last N days)
+    -- Only includes orders with total >= $5,000 and status != Draft
     sf_orders AS (
         SELECT
             sfo.account_id,
@@ -298,6 +299,7 @@ def load_inventory_data(lookback_days: int = 90):
         FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
         WHERE sfo.account_type = 'Distributor'
             AND sfo.order_status != 'Draft'
+            AND sfo.order_total_amount >= 5000
             AND sfo.order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
             AND sfo.order_date <= CURRENT_DATE()
         GROUP BY account_id, customer_name
@@ -533,7 +535,7 @@ def load_trend_data(lookback_weeks: int = 12):
 
     query = f"""
     WITH
-    -- Weekly SF orders
+    -- Weekly SF orders (orders >= $5K, status != Draft)
     weekly_orders AS (
         SELECT
             DATE_TRUNC(order_date, WEEK) as week_start,
@@ -543,6 +545,7 @@ def load_trend_data(lookback_weeks: int = 12):
         FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened`
         WHERE account_type = 'Distributor'
             AND order_status != 'Draft'
+            AND order_total_amount >= 5000
             AND order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_weeks} WEEK)
             AND order_date <= CURRENT_DATE()
         GROUP BY week_start
@@ -861,26 +864,27 @@ def main():
     col1, col2 = st.columns([2, 1])
 
     with col1:
-        st.markdown('<p class="section-header">Orders vs Depletion Trend</p>', unsafe_allow_html=True)
+        st.markdown('<p class="section-header">Order Value vs Depletion Trend</p>', unsafe_allow_html=True)
 
         if not trend_df.empty:
             trend_sorted = trend_df.sort_values('week_start')
 
-            # Calculate 4-week moving averages
-            trend_sorted['orders_ma'] = trend_sorted['qty_ordered'].rolling(window=4, min_periods=2).mean()
+            # Calculate 4-week moving averages (using order_value in $K for readability)
+            trend_sorted['orders_ma'] = (trend_sorted['order_value'] / 1000).rolling(window=4, min_periods=2).mean()
             trend_sorted['depletion_ma'] = trend_sorted['qty_depleted'].rolling(window=4, min_periods=2).mean()
 
             fig = go.Figure()
 
-            # Raw data lines
+            # Raw data lines - Order Value in $K
             fig.add_trace(go.Scatter(
                 x=trend_sorted['week_start'],
-                y=trend_sorted['qty_ordered'],
+                y=trend_sorted['order_value'] / 1000,
                 mode='lines+markers',
-                name='Qty Ordered (SF)',
+                name='Order Value $K (SF)',
                 line=dict(color=COLORS['primary'], width=2),
                 marker=dict(size=6),
-                opacity=0.7
+                opacity=0.7,
+                hovertemplate='$%{y:,.0f}K<extra></extra>'
             ))
 
             fig.add_trace(go.Scatter(
@@ -890,7 +894,8 @@ def main():
                 name='Qty Depleted (VIP)',
                 line=dict(color=COLORS['secondary'], width=2),
                 marker=dict(size=6),
-                opacity=0.7
+                opacity=0.7,
+                yaxis='y2'
             ))
 
             # Moving average lines (dashed for distinction)
@@ -908,11 +913,14 @@ def main():
                 mode='lines',
                 name='Depletion 4-wk MA',
                 line=dict(color=COLORS['secondary'], width=3, dash='dash'),
+                yaxis='y2'
             ))
 
             apply_dark_theme(fig, height=350,
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#8892b0')),
-                hovermode='x unified'
+                hovermode='x unified',
+                yaxis=dict(title='Order Value ($K)', titlefont=dict(color=COLORS['primary']), tickfont=dict(color=COLORS['primary'])),
+                yaxis2=dict(title='Units Depleted', titlefont=dict(color=COLORS['secondary']), tickfont=dict(color=COLORS['secondary']), anchor='x', overlaying='y', side='right')
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
