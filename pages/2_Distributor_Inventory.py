@@ -869,38 +869,36 @@ def main():
     col1, col2 = st.columns([2, 1])
 
     with col1:
-        st.markdown('<p class="section-header">Order Value vs Depletion Trend</p>', unsafe_allow_html=True)
+        st.markdown('<p class="section-header">Units Ordered vs Depleted</p>', unsafe_allow_html=True)
 
         if not trend_df.empty:
             trend_sorted = trend_df.sort_values('week_start')
 
-            # Calculate 4-week moving averages (using order_value in $K for readability)
-            trend_sorted['orders_ma'] = (trend_sorted['order_value'] / 1000).rolling(window=4, min_periods=2).mean()
+            # Calculate 4-week moving averages (both in units)
+            trend_sorted['orders_ma'] = trend_sorted['qty_ordered'].rolling(window=4, min_periods=2).mean()
             trend_sorted['depletion_ma'] = trend_sorted['qty_depleted'].rolling(window=4, min_periods=2).mean()
 
             fig = go.Figure()
 
-            # Raw data lines - Order Value in $K
+            # Raw data lines - both in units
             fig.add_trace(go.Scatter(
                 x=trend_sorted['week_start'],
-                y=trend_sorted['order_value'] / 1000,
+                y=trend_sorted['qty_ordered'],
                 mode='lines+markers',
-                name='Order Value $K (SF)',
+                name='Units Ordered (SF)',
                 line=dict(color=COLORS['primary'], width=2),
                 marker=dict(size=6),
-                opacity=0.7,
-                hovertemplate='$%{y:,.0f}K<extra></extra>'
+                opacity=0.7
             ))
 
             fig.add_trace(go.Scatter(
                 x=trend_sorted['week_start'],
                 y=trend_sorted['qty_depleted'],
                 mode='lines+markers',
-                name='Qty Depleted (VIP)',
+                name='Units Depleted (VIP)',
                 line=dict(color=COLORS['secondary'], width=2),
                 marker=dict(size=6),
-                opacity=0.7,
-                yaxis='y2'
+                opacity=0.7
             ))
 
             # Moving average lines (dashed for distinction)
@@ -918,14 +916,12 @@ def main():
                 mode='lines',
                 name='Depletion 4-wk MA',
                 line=dict(color=COLORS['secondary'], width=3, dash='dash'),
-                yaxis='y2'
             ))
 
             apply_dark_theme(fig, height=350,
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#8892b0')),
                 hovermode='x unified',
-                yaxis=dict(title=dict(text='Order Value ($K)', font=dict(color=COLORS['primary'])), tickfont=dict(color=COLORS['primary']), tickformat='$,.0f'),
-                yaxis2=dict(title=dict(text='Units Depleted', font=dict(color=COLORS['secondary'])), tickfont=dict(color=COLORS['secondary']), tickformat=',.0f', anchor='x', overlaying='y', side='right')
+                yaxis=dict(title=dict(text='Units', font=dict(color='#ccd6f6')), tickfont=dict(color='#ccd6f6'), tickformat=',.0f')
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
