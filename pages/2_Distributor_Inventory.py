@@ -681,16 +681,16 @@ def generate_ensemble_forecast(trend_df: pd.DataFrame, forecast_weeks: int = 12)
     df = trend_df.sort_values('week_start').copy()
 
     # Need at least 4 weeks of data
-    df_clean = df.dropna(subset=['qty_depleted', 'qty_ordered'])
+    df_clean = df.dropna(subset=['qty_depleted', 'order_value'])
     if len(df_clean) < 4:
         # Try with just non-zero values
-        df_clean = df[(df['qty_depleted'] > 0) | (df['qty_ordered'] > 0)]
+        df_clean = df[(df['qty_depleted'] > 0) | (df['order_value'] > 0)]
         if len(df_clean) < 4:
             return None
 
-    # Historical values
+    # Historical values - use order_value (dollars) instead of qty_ordered (units)
     y_depletion = df_clean['qty_depleted'].fillna(0).values
-    y_orders = df_clean['qty_ordered'].fillna(0).values
+    y_orders = df_clean['order_value'].fillna(0).values
 
     # Future weeks
     future_weeks = pd.date_range(
@@ -727,8 +727,8 @@ def generate_ensemble_forecast(trend_df: pd.DataFrame, forecast_weeks: int = 12)
         'orders_ci_95_upper': orders_fc['ci_95_upper'],
     })
 
-    # Historical data for plotting continuity
-    historical_df = df_clean[['week_start', 'qty_depleted', 'qty_ordered']].copy()
+    # Historical data for plotting continuity - use order_value for dollars
+    historical_df = df_clean[['week_start', 'qty_depleted', 'order_value']].copy()
     historical_df['is_forecast'] = False
 
     return forecast_df, historical_df
@@ -1031,20 +1031,21 @@ def main():
                 st.markdown('<p style="color: #ccd6f6; font-size: 16px; font-weight: 600;">Orders Forecast</p>', unsafe_allow_html=True)
                 fig_orders = go.Figure()
 
-                # Historical orders line
+                # Historical orders line (in $K for readability)
                 fig_orders.add_trace(go.Scatter(
                     x=historical_df['week_start'],
-                    y=historical_df['qty_ordered'],
+                    y=historical_df['order_value'] / 1000,
                     mode='lines+markers',
                     name='Historical Orders',
                     line=dict(color=COLORS['primary'], width=3),
-                    marker=dict(size=6)
+                    marker=dict(size=6),
+                    hovertemplate='$%{y:,.0f}K<extra></extra>'
                 ))
 
-                # 95% Confidence interval (outer cone) - Orders
+                # 95% Confidence interval (outer cone) - Orders (in $K)
                 fig_orders.add_trace(go.Scatter(
                     x=pd.concat([forecast_df['week_start'], forecast_df['week_start'][::-1]]),
-                    y=pd.concat([forecast_df['orders_ci_95_upper'], forecast_df['orders_ci_95_lower'][::-1]]),
+                    y=pd.concat([forecast_df['orders_ci_95_upper'] / 1000, forecast_df['orders_ci_95_lower'][::-1] / 1000]),
                     fill='toself',
                     fillcolor='rgba(102, 126, 234, 0.15)',
                     line=dict(color='rgba(0,0,0,0)'),
@@ -1053,10 +1054,10 @@ def main():
                     hoverinfo='skip'
                 ))
 
-                # 80% Confidence interval (inner cone) - Orders
+                # 80% Confidence interval (inner cone) - Orders (in $K)
                 fig_orders.add_trace(go.Scatter(
                     x=pd.concat([forecast_df['week_start'], forecast_df['week_start'][::-1]]),
-                    y=pd.concat([forecast_df['orders_ci_80_upper'], forecast_df['orders_ci_80_lower'][::-1]]),
+                    y=pd.concat([forecast_df['orders_ci_80_upper'] / 1000, forecast_df['orders_ci_80_lower'][::-1] / 1000]),
                     fill='toself',
                     fillcolor='rgba(102, 126, 234, 0.3)',
                     line=dict(color='rgba(0,0,0,0)'),
@@ -1065,14 +1066,15 @@ def main():
                     hoverinfo='skip'
                 ))
 
-                # Ensemble forecast line - Orders
+                # Ensemble forecast line - Orders (in $K)
                 fig_orders.add_trace(go.Scatter(
                     x=forecast_df['week_start'],
-                    y=forecast_df['orders_ensemble'],
+                    y=forecast_df['orders_ensemble'] / 1000,
                     mode='lines+markers',
                     name='Forecast',
                     line=dict(color=COLORS['primary'], width=3),
-                    marker=dict(size=6, symbol='diamond')
+                    marker=dict(size=6, symbol='diamond'),
+                    hovertemplate='$%{y:,.0f}K<extra></extra>'
                 ))
 
                 # Vertical line for forecast start
@@ -1087,7 +1089,7 @@ def main():
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#8892b0', size=9)),
                     hovermode='x unified'
                 )
-                fig_orders.update_layout(yaxis_title="Units Ordered")
+                fig_orders.update_layout(yaxis_title="Order Value ($K)")
                 st.plotly_chart(fig_orders, use_container_width=True)
 
             with fchart2:
