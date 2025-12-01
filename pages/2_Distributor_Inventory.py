@@ -840,7 +840,9 @@ def main():
     balanced_pct = round(100 * balanced_count / max(has_depletion_total, 1), 1)
 
     # Inventory Health Summary Table
-    st.markdown("""
+    order_value_millions = total_order_value / 1000000
+    avg_weeks_display = avg_weeks if pd.notna(avg_weeks) else 0
+    st.markdown(f"""
     <div style="background: linear-gradient(145deg, #1e1e2f 0%, #2a2a4a 100%); border-radius: 16px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 24px;">
         <h3 style="color: #ccd6f6; margin: 0 0 20px 0; font-size: 18px; font-weight: 600;">📊 Inventory Health Summary</h3>
         <table style="width: 100%; border-collapse: collapse; color: #ccd6f6;">
@@ -861,7 +863,7 @@ def main():
                 </tr>
                 <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
                     <td style="padding: 14px 8px; font-size: 14px;">Order Value ({lookback_days}d)</td>
-                    <td style="text-align: right; padding: 14px 8px; font-size: 18px; font-weight: 600; color: #00d4aa;">${total_order_value/1000000:.1f}M</td>
+                    <td style="text-align: right; padding: 14px 8px; font-size: 18px; font-weight: 600; color: #00d4aa;">${order_value_millions:.1f}M</td>
                     <td style="text-align: right; padding: 14px 8px; color: #8892b0;">—</td>
                     <td style="text-align: center; padding: 14px 8px;"><span style="background: rgba(0, 212, 170, 0.2); color: #00d4aa; padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 600;">REVENUE</span></td>
                 </tr>
@@ -893,28 +895,14 @@ def main():
             <tfoot>
                 <tr style="border-top: 2px solid rgba(255,255,255,0.1);">
                     <td style="padding: 14px 8px; font-size: 14px; font-weight: 600;">Avg Weeks of Inventory</td>
-                    <td style="text-align: right; padding: 14px 8px; font-size: 18px; font-weight: 600; color: #667eea;">{avg_weeks:.1f}</td>
+                    <td style="text-align: right; padding: 14px 8px; font-size: 18px; font-weight: 600; color: #667eea;">{avg_weeks_display:.1f}</td>
                     <td style="text-align: right; padding: 14px 8px; color: #8892b0;">—</td>
                     <td style="text-align: center; padding: 14px 8px;"><span style="background: rgba(102, 126, 234, 0.2); color: #667eea; padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 600;">WEEKS</span></td>
                 </tr>
             </tfoot>
         </table>
     </div>
-    """.format(
-        total_distributors=total_distributors,
-        lookback_days=lookback_days,
-        total_order_value=total_order_value,
-        understock_threshold=understock_threshold,
-        understock_count=understock_count,
-        understock_pct=understock_pct,
-        overstock_threshold=overstock_threshold,
-        overstock_count=overstock_count,
-        overstock_pct=overstock_pct,
-        balanced_count=balanced_count,
-        balanced_pct=balanced_pct,
-        no_depletion_count=no_depletion_count,
-        avg_weeks=avg_weeks if pd.notna(avg_weeks) else 0
-    ), unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
     # Action Items: Top Understocked + Top Overstocked (using threshold-based logic)
     # Placed right after KPIs for immediate visibility
@@ -1284,7 +1272,12 @@ def main():
             o_trend_label = "▲" if o_trend > 5 else ("▼" if o_trend < -5 else "—")
             d_trend_label = "▲" if d_trend > 5 else ("▼" if d_trend < -5 else "—")
 
-            st.markdown("""
+            # Pre-calculate values for f-string
+            orders_4wk_m = orders_4wk / 1000000
+            orders_8wk_m = orders_8wk / 1000000
+            orders_12wk_m = orders_12wk / 1000000
+
+            st.markdown(f"""
             <div style="background: linear-gradient(145deg, #1e1e2f 0%, #2a2a4a 100%); border-radius: 16px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); margin-top: 20px;">
                 <h3 style="color: #ccd6f6; margin: 0 0 20px 0; font-size: 18px; font-weight: 600;">📈 Forecast Summary</h3>
                 <table style="width: 100%; border-collapse: collapse; color: #ccd6f6;">
@@ -1301,9 +1294,9 @@ def main():
                         <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
                             <td style="padding: 16px 8px; font-size: 14px;">📦 Orders (Revenue)</td>
                             <td style="text-align: center; padding: 16px 8px;"><span style="color: {o_trend_color}; font-size: 16px; font-weight: 600;">{o_trend_label} {o_trend:+.1f}%</span></td>
-                            <td style="text-align: right; padding: 16px 8px; font-size: 16px; font-weight: 600; color: #667eea;">${orders_4wk/1000000:.2f}M</td>
-                            <td style="text-align: right; padding: 16px 8px; font-size: 16px; font-weight: 600; color: #667eea;">${orders_8wk/1000000:.2f}M</td>
-                            <td style="text-align: right; padding: 16px 8px; font-size: 16px; font-weight: 600; color: #667eea;">${orders_12wk/1000000:.2f}M</td>
+                            <td style="text-align: right; padding: 16px 8px; font-size: 16px; font-weight: 600; color: #667eea;">${orders_4wk_m:.2f}M</td>
+                            <td style="text-align: right; padding: 16px 8px; font-size: 16px; font-weight: 600; color: #667eea;">${orders_8wk_m:.2f}M</td>
+                            <td style="text-align: right; padding: 16px 8px; font-size: 16px; font-weight: 600; color: #667eea;">${orders_12wk_m:.2f}M</td>
                         </tr>
                         <tr>
                             <td style="padding: 16px 8px; font-size: 14px;">📉 Depletion (Units)</td>
@@ -1315,20 +1308,7 @@ def main():
                     </tbody>
                 </table>
             </div>
-            """.format(
-                o_trend_color=o_trend_color,
-                o_trend_label=o_trend_label,
-                o_trend=o_trend,
-                orders_4wk=orders_4wk,
-                orders_8wk=orders_8wk,
-                orders_12wk=orders_12wk,
-                d_trend_color=d_trend_color,
-                d_trend_label=d_trend_label,
-                d_trend=d_trend,
-                depl_4wk=depl_4wk,
-                depl_8wk=depl_8wk,
-                depl_12wk=depl_12wk
-            ), unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
         else:
             st.info("Not enough historical data to generate forecast (need at least 4 weeks)")
