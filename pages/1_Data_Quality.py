@@ -102,6 +102,26 @@ def load_vip_sf_alignment():
     return client.query("SELECT * FROM `artful-logic-475116-p1.staging_data_quality.vip_sf_alignment`").to_dataframe().iloc[0]
 
 
+@st.cache_data(ttl=300)
+def load_covered_doors_stats():
+    """Load stats from the deduped active customer fact sheet"""
+    client = get_bq_client()
+    query = """
+    SELECT
+        COUNT(*) as total_covered_doors,
+        SUM(CASE WHEN sfdc_account_id IS NOT NULL THEN 1 ELSE 0 END) as matched_to_sfdc,
+        SUM(CASE WHEN vip_code_count > 1 THEN 1 ELSE 0 END) as consolidated_addresses,
+        SUM(vip_code_count) - COUNT(*) as codes_consolidated,
+        MAX(most_recent_order_date) as latest_depletion_date,
+        SUM(qty_last_30_days) as total_30d_volume,
+        SUM(CASE WHEN customer_status = 'Active' THEN 1 ELSE 0 END) as active_customers,
+        SUM(CASE WHEN customer_status = 'At Risk' THEN 1 ELSE 0 END) as at_risk_customers,
+        SUM(CASE WHEN customer_status = 'Churned' THEN 1 ELSE 0 END) as churned_customers
+    FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_v2_deduped`
+    """
+    return client.query(query).to_dataframe().iloc[0]
+
+
 def render_metric_card(value, label, sublabel=None, status="neutral"):
     value_class = {"healthy": "metric-value-green", "warning": "metric-value-yellow", "critical": "metric-value-red", "neutral": "metric-value"}.get(status, "metric-value")
     sublabel_html = f'<div class="metric-sublabel">{sublabel}</div>' if sublabel else ""
@@ -141,17 +161,35 @@ def calculate_health_score(vip_stats, sf_stats, alignment_stats):
 
 
 def main():
-    st.markdown('''<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px;">
-        <div><h1 class="dashboard-header">Data Quality Command Center</h1><p class="dashboard-subtitle">VIP ↔ Salesforce Alignment • Data Quality Metrics</p></div>
-        <div class="live-indicator"><span class="live-dot"></span>Live Data</div></div>''', unsafe_allow_html=True)
-
     try:
         vip_stats = load_vip_match_quality()
         sf_stats = load_salesforce_quality()
         alignment_stats = load_vip_sf_alignment()
+        covered_doors = load_covered_doors_stats()
     except Exception as e:
         st.error(f"Error loading data: {e}")
         return
+
+    # Calculate VIP data freshness
+    latest_depletion = covered_doors['latest_depletion_date']
+    if pd.notna(latest_depletion):
+        if isinstance(latest_depletion, str):
+            latest_depletion = datetime.strptime(latest_depletion, '%Y-%m-%d').date()
+        days_old = (datetime.now().date() - latest_depletion).days
+        freshness_status = "healthy" if days_old <= 7 else "warning" if days_old <= 14 else "critical"
+        freshness_text = f"VIP Data: {latest_depletion.strftime('%b %d')} ({days_old}d old)"
+    else:
+        freshness_status = "critical"
+        freshness_text = "VIP Data: Unknown"
+
+    freshness_class = {"healthy": "status-healthy", "warning": "status-warning", "critical": "status-critical"}[freshness_status]
+
+    st.markdown(f'''<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px;">
+        <div><h1 class="dashboard-header">Data Quality Command Center</h1><p class="dashboard-subtitle">VIP ↔ Salesforce Alignment • Data Quality Metrics</p></div>
+        <div style="display: flex; align-items: center; gap: 16px;">
+            <span class="{freshness_class}">{freshness_text}</span>
+            <div class="live-indicator"><span class="live-dot"></span>Live Data</div>
+        </div></div>''', unsafe_allow_html=True)
 
     health_score = calculate_health_score(vip_stats, sf_stats, alignment_stats)
     health_status = "healthy" if health_score >= 80 else "warning" if health_score >= 60 else "critical"
@@ -170,10 +208,43 @@ def main():
         st.markdown(render_metric_card(f"{dup_count:,}", "Duplicate Names", "Salesforce Accounts", "healthy" if dup_count < 1000 else "warning" if dup_count < 5000 else "critical"), unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown('<p class="section-header">VIP ↔ Salesforce Alignment</p>', unsafe_allow_html=True)
+    st.markdown('<p class="section-header">VIP ↔ Salesforce Alignment (Full Universe)</p>', unsafe_allow_html=True)
     st.markdown(render_alignment_row("Retail Locations", alignment_stats['vip_retail_count'], alignment_stats['sf_retail_count'], alignment_stats['matched_retail_count'], alignment_stats['retail_match_rate_pct']), unsafe_allow_html=True)
     st.markdown(render_alignment_row("Distributors", alignment_stats['vip_distributor_count'], alignment_stats['sf_distributor_count'], alignment_stats['matched_distributor_count'], alignment_stats['distributor_match_rate_pct']), unsafe_allow_html=True)
     st.markdown(render_alignment_row("Chain HQs", alignment_stats['vip_chain_count'], alignment_stats['sf_chain_hq_count'], alignment_stats['matched_chain_count'], alignment_stats['chain_match_rate_pct']), unsafe_allow_html=True)
+
+    # Covered Doors Section (Active Customers - Deduped)
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown('<p class="section-header">Covered Doors (Active Customers)</p>', unsafe_allow_html=True)
+
+    cd_col1, cd_col2, cd_col3, cd_col4 = st.columns(4)
+    with cd_col1:
+        total_doors = int(covered_doors['total_covered_doors'])
+        st.markdown(render_metric_card(f"{total_doors:,}", "Unique Doors", "Deduped by address", "neutral"), unsafe_allow_html=True)
+    with cd_col2:
+        matched = int(covered_doors['matched_to_sfdc'])
+        match_pct = 100 * matched / total_doors if total_doors > 0 else 0
+        st.markdown(render_metric_card(f"{match_pct:.1f}%", "SFDC Match Rate", f"{matched:,} matched", "healthy" if match_pct >= 95 else "warning" if match_pct >= 85 else "critical"), unsafe_allow_html=True)
+    with cd_col3:
+        active = int(covered_doors['active_customers'])
+        active_pct = 100 * active / total_doors if total_doors > 0 else 0
+        st.markdown(render_metric_card(f"{active:,}", "Active (30d)", f"{active_pct:.0f}% of doors", "healthy" if active_pct >= 50 else "warning" if active_pct >= 30 else "neutral"), unsafe_allow_html=True)
+    with cd_col4:
+        consolidated = int(covered_doors['consolidated_addresses'])
+        codes_merged = int(covered_doors['codes_consolidated'])
+        st.markdown(render_metric_card(f"{consolidated}", "Consolidated", f"{codes_merged} VIP codes merged", "neutral"), unsafe_allow_html=True)
+
+    # Customer status breakdown
+    cd_sub1, cd_sub2, cd_sub3 = st.columns(3)
+    with cd_sub1:
+        at_risk = int(covered_doors['at_risk_customers'])
+        st.markdown(render_metric_card(f"{at_risk:,}", "At Risk (31-90d)", status="warning"), unsafe_allow_html=True)
+    with cd_sub2:
+        churned = int(covered_doors['churned_customers'])
+        st.markdown(render_metric_card(f"{churned:,}", "Churned (>90d)", status="critical"), unsafe_allow_html=True)
+    with cd_sub3:
+        vol_30d = int(covered_doors['total_30d_volume'])
+        st.markdown(render_metric_card(f"{vol_30d:,}", "30-Day Volume", "Total units", "neutral"), unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     col1, col2 = st.columns(2)
