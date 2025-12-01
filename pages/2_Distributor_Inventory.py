@@ -294,7 +294,7 @@ def load_inventory_data(lookback_days: int = 90):
     query = f"""
     WITH
     -- Salesforce orders to distributors (last N days)
-    -- Only includes orders with total >= $5,000 and status != Draft
+    -- Excludes Draft orders
     sf_orders AS (
         SELECT
             sfo.account_id,
@@ -306,7 +306,6 @@ def load_inventory_data(lookback_days: int = 90):
         FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
         WHERE sfo.account_type = 'Distributor'
             AND sfo.order_status != 'Draft'
-            AND sfo.order_total_amount >= 5000
             AND sfo.order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
             AND sfo.order_date <= CURRENT_DATE()
         GROUP BY account_id, customer_name
@@ -542,7 +541,7 @@ def load_trend_data(lookback_weeks: int = 12):
 
     query = f"""
     WITH
-    -- Weekly SF orders (orders >= $5K, status != Draft)
+    -- Weekly SF orders (excludes Draft orders)
     weekly_orders AS (
         SELECT
             DATE_TRUNC(order_date, WEEK) as week_start,
@@ -552,7 +551,6 @@ def load_trend_data(lookback_weeks: int = 12):
         FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened`
         WHERE account_type = 'Distributor'
             AND order_status != 'Draft'
-            AND order_total_amount >= 5000
             AND order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_weeks} WEEK)
             AND order_date <= CURRENT_DATE()
         GROUP BY week_start
