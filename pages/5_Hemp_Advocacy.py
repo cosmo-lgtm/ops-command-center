@@ -20,6 +20,13 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
 
+    /* Force wide layout */
+    .block-container {
+        max-width: 100% !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+    }
+
     .stApp {
         background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #0f0f1a 100%);
     }

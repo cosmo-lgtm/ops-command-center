@@ -13,6 +13,14 @@ import plotly.express as px
 import plotly.graph_objects as go
 from scipy import stats
 
+# Page config - MUST be first Streamlit command
+st.set_page_config(
+    page_title="Distributor Inventory",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 # Dark mode custom CSS
 st.markdown("""
 <style>
