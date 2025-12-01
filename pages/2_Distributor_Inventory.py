@@ -757,27 +757,8 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # Load data
-    try:
-        distributors_df = load_distributors()
-        inventory_df = load_inventory_data(lookback_days=90)
-        trend_df = load_trend_data(lookback_weeks=12)
-    except Exception as e:
-        st.error(f"Error loading data: {e}")
-        return
-
-    # Filter Section
+    # Filter Section - selectors first, then data load uses their values
     col1, col2, col3 = st.columns([3, 1, 1])
-
-    with col1:
-        # Distributor multiselect
-        distributor_options = ["All Distributors"] + sorted(inventory_df['distributor_name'].dropna().unique().tolist())
-        selected_distributors = st.multiselect(
-            "Select Distributors",
-            options=distributor_options,
-            default=["All Distributors"],
-            help="Select one or more distributors to filter the analysis"
-        )
 
     with col2:
         lookback_days = st.selectbox(
@@ -793,6 +774,25 @@ def main():
             options=[8, 10, 12, 16],
             index=2,
             format_func=lambda x: f"{x} weeks"
+        )
+
+    # Load data with selected lookback period
+    try:
+        distributors_df = load_distributors()
+        inventory_df = load_inventory_data(lookback_days=lookback_days)
+        trend_df = load_trend_data(lookback_weeks=max(12, lookback_days // 7))
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+        return
+
+    with col1:
+        # Distributor multiselect (after data load so we have the options)
+        distributor_options = ["All Distributors"] + sorted(inventory_df['distributor_name'].dropna().unique().tolist())
+        selected_distributors = st.multiselect(
+            "Select Distributors",
+            options=distributor_options,
+            default=["All Distributors"],
+            help="Select one or more distributors to filter the analysis"
         )
 
     # Filter the data based on selection
@@ -813,13 +813,13 @@ def main():
         (filtered_df['total_qty_depleted'] > 0)
     ]
 
-    # Status counts based on weeks_of_inventory (consistent with chart)
-    # <4 weeks = Understock, 4-12 weeks = Balanced, >12 weeks = Overstock
-    overstock_count = len(has_depletion_df[has_depletion_df['weeks_of_inventory'] > 12])
+    # Status counts based on weeks_of_inventory (using selected threshold)
+    # <4 weeks = Understock, 4-threshold weeks = Balanced, >threshold weeks = Overstock
+    overstock_count = len(has_depletion_df[has_depletion_df['weeks_of_inventory'] > inventory_threshold])
     understock_count = len(has_depletion_df[has_depletion_df['weeks_of_inventory'] < 4])
     balanced_count = len(has_depletion_df[
         (has_depletion_df['weeks_of_inventory'] >= 4) &
-        (has_depletion_df['weeks_of_inventory'] <= 12)
+        (has_depletion_df['weeks_of_inventory'] <= inventory_threshold)
     ])
     no_depletion_count = len(filtered_df) - len(has_depletion_df)
 
@@ -837,7 +837,7 @@ def main():
     with col2:
         st.markdown(render_metric_card(
             f"${total_order_value/1000000:.1f}M",
-            "Order Value (90d)"
+            f"Order Value ({lookback_days}d)"
         ), unsafe_allow_html=True)
 
     with col3:
@@ -846,7 +846,7 @@ def main():
         overstock_pct = round(100 * overstock_count / max(has_depletion_total, 1), 1)
         st.markdown(render_metric_card(
             f"{overstock_count} ({overstock_pct}%)",
-            "Overstocked (>12 wks)",
+            f"Overstocked (>{inventory_threshold} wks)",
             card_type="warning"
         ), unsafe_allow_html=True)
 
@@ -953,7 +953,7 @@ def main():
         ))
 
         fig.add_trace(go.Bar(
-            name='Balanced (4-12 wks)',
+            name=f'Balanced (4-{inventory_threshold} wks)',
             x=['With Depletion'],
             y=[balanced_count_chart],
             marker_color=COLORS['success'],
@@ -963,7 +963,7 @@ def main():
         ))
 
         fig.add_trace(go.Bar(
-            name='Overstock (>12 wks)',
+            name=f'Overstock (>{inventory_threshold} wks)',
             x=['With Depletion'],
             y=[overstock_count_chart],
             marker_color=COLORS['warning'],
