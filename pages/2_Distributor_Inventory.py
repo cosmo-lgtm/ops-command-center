@@ -1032,13 +1032,25 @@ def main():
                 fig_orders = go.Figure()
 
                 # Historical orders line (in $K for readability)
+                hist_orders = historical_df['order_value'] / 1000
                 fig_orders.add_trace(go.Scatter(
                     x=historical_df['week_start'],
-                    y=historical_df['order_value'] / 1000,
+                    y=hist_orders,
                     mode='lines+markers',
                     name='Historical Orders',
                     line=dict(color=COLORS['primary'], width=3),
                     marker=dict(size=6),
+                    hovertemplate='$%{y:,.0f}K<extra></extra>'
+                ))
+
+                # 4-week moving average (dotted line) - Orders
+                orders_ma = hist_orders.rolling(window=4, min_periods=2).mean()
+                fig_orders.add_trace(go.Scatter(
+                    x=historical_df['week_start'],
+                    y=orders_ma,
+                    mode='lines',
+                    name='4-wk MA',
+                    line=dict(color=COLORS['primary'], width=2, dash='dot'),
                     hovertemplate='$%{y:,.0f}K<extra></extra>'
                 ))
 
@@ -1100,13 +1112,24 @@ def main():
                 fig_depl = go.Figure()
 
                 # Historical depletion line
+                hist_depletion = historical_df['qty_depleted']
                 fig_depl.add_trace(go.Scatter(
                     x=historical_df['week_start'],
-                    y=historical_df['qty_depleted'],
+                    y=hist_depletion,
                     mode='lines+markers',
                     name='Historical Depletion',
                     line=dict(color=COLORS['secondary'], width=3),
                     marker=dict(size=6)
+                ))
+
+                # 4-week moving average (dotted line) - Depletion
+                depletion_ma = hist_depletion.rolling(window=4, min_periods=2).mean()
+                fig_depl.add_trace(go.Scatter(
+                    x=historical_df['week_start'],
+                    y=depletion_ma,
+                    mode='lines',
+                    name='4-wk MA',
+                    line=dict(color=COLORS['secondary'], width=2, dash='dot')
                 ))
 
                 # 95% Confidence interval (outer cone) - Depletion
