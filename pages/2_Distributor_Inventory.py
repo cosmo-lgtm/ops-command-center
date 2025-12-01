@@ -584,80 +584,63 @@ def load_trend_data(lookback_weeks: int = 12):
 
 def _forecast_single_series(y: np.ndarray, forecast_weeks: int = 12):
     """
-    Generate forecast for a single time series using ensemble of 3 models.
-    Returns ensemble forecast and confidence intervals.
+    Generate forecast for a single time series using damped trend approach.
+    Trends regress toward the mean over time (more realistic for sales data).
     """
     n = len(y)
-    x = np.arange(n)
-    future_x = np.arange(n, n + forecast_weeks)
 
-    # === Model 1: Linear Regression ===
-    slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
-    lr_forecast = intercept + slope * future_x
-    lr_forecast = np.maximum(lr_forecast, 0)
+    # Calculate key statistics
+    overall_mean = np.mean(y)
+    recent_mean = np.mean(y[-4:]) if n >= 4 else overall_mean  # Last 4 weeks
 
-    # === Model 2: Exponential Smoothing (Simple) ===
-    alpha = 0.3
-    smoothed = np.zeros(n)
-    smoothed[0] = y[0]
-    for i in range(1, n):
-        smoothed[i] = alpha * y[i] + (1 - alpha) * smoothed[i-1]
-
-    recent_trend = (smoothed[-1] - smoothed[-4]) / 4 if n >= 4 else 0
-    es_forecast = np.array([smoothed[-1] + recent_trend * (i+1) for i in range(forecast_weeks)])
-    es_forecast = np.maximum(es_forecast, 0)
-
-    # === Model 3: Moving Average with Trend ===
-    window = min(4, n)
-    ma = np.convolve(y, np.ones(window)/window, mode='valid')
-
-    if len(ma) >= 2:
-        ma_trend = (ma[-1] - ma[0]) / len(ma)
+    # Calculate recent trend (last 4 weeks vs previous 4 weeks)
+    if n >= 8:
+        recent_4wk = np.mean(y[-4:])
+        previous_4wk = np.mean(y[-8:-4])
+        weekly_trend = (recent_4wk - previous_4wk) / 4
+    elif n >= 4:
+        weekly_trend = (y[-1] - y[-4]) / 4
     else:
-        ma_trend = 0
+        weekly_trend = 0
 
-    ma_base = ma[-1] if len(ma) > 0 else y[-1]
-    mat_forecast = np.array([ma_base + ma_trend * (i+1) for i in range(forecast_weeks)])
-    mat_forecast = np.maximum(mat_forecast, 0)
+    # Damping factor - trend decays toward zero over time
+    # After ~8 weeks, trend influence is halved
+    damping = 0.92
 
-    # === Ensemble: Average of 3 models ===
-    ensemble = (lr_forecast + es_forecast + mat_forecast) / 3
+    # Generate forecast with damped trend (regresses to recent mean)
+    forecast = np.zeros(forecast_weeks)
+    current_level = recent_mean
+    current_trend = weekly_trend
 
-    # === Confidence Intervals (tightened for practical use) ===
-    # Use coefficient of variation (CV) for relative uncertainty
-    mean_val = np.mean(y)
-    cv = np.std(y) / mean_val if mean_val > 0 else 0.15
+    for i in range(forecast_weeks):
+        # Trend decays each week
+        current_trend = current_trend * damping
+        # Level moves toward overall mean slowly
+        current_level = current_level + current_trend + 0.05 * (overall_mean - current_level)
+        forecast[i] = current_level
 
-    # Cap CV at reasonable levels (15-25% typical for sales data)
-    cv = min(cv, 0.25)
+    # Ensure non-negative and set floor at 50% of recent mean
+    floor = recent_mean * 0.5
+    forecast = np.maximum(forecast, floor)
 
-    # Model disagreement as percentage of ensemble
-    model_spread = np.std([lr_forecast, es_forecast, mat_forecast], axis=0)
-    model_cv = model_spread / (ensemble + 1)  # +1 to avoid division by zero
+    # === Confidence Intervals ===
+    cv = np.std(y) / overall_mean if overall_mean > 0 else 0.15
+    cv = min(cv, 0.25)  # Cap at 25%
 
-    # Combined uncertainty: blend of historical CV and model disagreement
-    # Weight model disagreement less since ensemble averages it out
-    combined_cv = np.sqrt((cv * 0.6)**2 + (model_cv * 0.4)**2)
+    # Uncertainty grows with horizon
+    horizon_factor = 1 + 0.1 * np.sqrt(np.arange(1, forecast_weeks + 1))
+    uncertainty = cv * horizon_factor * forecast
 
-    # Gentle horizon growth (log instead of sqrt for tighter long-term bounds)
-    horizon_factor = 1 + 0.15 * np.log1p(np.arange(forecast_weeks))
-
-    # Calculate bounds as percentage of forecast
-    uncertainty_pct = combined_cv * horizon_factor
-
-    # 80% CI: ~1.28 std devs but scaled down
-    ci_80_lower = np.maximum(ensemble * (1 - 0.8 * uncertainty_pct), 0)
-    ci_80_upper = ensemble * (1 + 0.8 * uncertainty_pct)
-
-    # 95% CI: ~1.96 std devs but scaled down
-    ci_95_lower = np.maximum(ensemble * (1 - 1.2 * uncertainty_pct), 0)
-    ci_95_upper = ensemble * (1 + 1.2 * uncertainty_pct)
+    ci_80_lower = np.maximum(forecast - 0.8 * uncertainty, floor * 0.8)
+    ci_80_upper = forecast + 0.8 * uncertainty
+    ci_95_lower = np.maximum(forecast - 1.2 * uncertainty, floor * 0.6)
+    ci_95_upper = forecast + 1.2 * uncertainty
 
     return {
-        'ensemble': ensemble,
-        'lr': lr_forecast,
-        'es': es_forecast,
-        'mat': mat_forecast,
+        'ensemble': forecast,
+        'lr': forecast,  # Keep for compatibility
+        'es': forecast,
+        'mat': forecast,
         'ci_80_lower': ci_80_lower,
         'ci_80_upper': ci_80_upper,
         'ci_95_lower': ci_95_lower,
