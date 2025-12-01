@@ -1342,53 +1342,78 @@ def main():
     except Exception as e:
         st.warning(f"Could not load product-level data: {e}")
 
-    # US State Depletion Map
-    st.markdown('<p class="section-header">Depletion by State</p>', unsafe_allow_html=True)
+    # US State Map with metric selector
+    st.markdown('<p class="section-header">Performance by State</p>', unsafe_allow_html=True)
 
     try:
         state_df = load_state_depletion_data(lookback_days=lookback_days)
 
         if not state_df.empty:
-            # Create choropleth map
-            fig = go.Figure(data=go.Choropleth(
-                locations=state_df['state'],
-                z=state_df['total_depleted'],
-                locationmode='USA-states',
-                colorscale=[
-                    [0, '#1a1a2e'],
-                    [0.2, '#0f3460'],
-                    [0.5, '#00a3cc'],
-                    [0.8, '#00d4aa'],
-                    [1, '#64ffda']
-                ],
-                colorbar=dict(
-                    title=dict(text='Units', font=dict(color='#ccd6f6', size=12)),
-                    tickfont=dict(color='#8892b0', size=10),
-                    thickness=15,
-                    len=0.7
-                ),
-                hovertemplate='<b>%{location}</b><br>' +
-                              'Depleted: %{z:,.0f}<extra></extra>',
-                marker_line_color='rgba(255,255,255,0.3)',
-                marker_line_width=0.5
-            ))
+            # Calculate avg PODs per door
+            state_df['avg_pods'] = state_df['total_pods'] / state_df['total_doors'].replace(0, 1)
 
-            fig.update_layout(
-                geo=dict(
-                    scope='usa',
-                    bgcolor='rgba(0,0,0,0)',
-                    lakecolor='rgba(0,0,0,0)',
-                    landcolor='#1a1a2e',
-                    showlakes=False,
-                    showland=True
-                ),
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)',
-                margin=dict(l=0, r=0, t=0, b=0),
-                height=350
-            )
+            # Metric selector and map in columns
+            map_col, selector_col = st.columns([4, 1])
 
-            st.plotly_chart(fig, use_container_width=True)
+            with selector_col:
+                map_metric = st.radio(
+                    "Metric",
+                    options=['Depletion', 'Doors', 'Total PODs', 'Avg PODs/Door'],
+                    index=0,
+                    key='map_metric_selector'
+                )
+
+            # Map metric to data column and labels
+            metric_config = {
+                'Depletion': {'col': 'total_depleted', 'label': 'Units', 'format': ',.0f'},
+                'Doors': {'col': 'total_doors', 'label': 'Doors', 'format': ',.0f'},
+                'Total PODs': {'col': 'total_pods', 'label': 'PODs', 'format': ',.0f'},
+                'Avg PODs/Door': {'col': 'avg_pods', 'label': 'Avg PODs', 'format': ',.1f'}
+            }
+
+            config = metric_config[map_metric]
+
+            with map_col:
+                # Create choropleth map
+                fig = go.Figure(data=go.Choropleth(
+                    locations=state_df['state'],
+                    z=state_df[config['col']],
+                    locationmode='USA-states',
+                    colorscale=[
+                        [0, '#1a1a2e'],
+                        [0.2, '#0f3460'],
+                        [0.5, '#00a3cc'],
+                        [0.8, '#00d4aa'],
+                        [1, '#64ffda']
+                    ],
+                    colorbar=dict(
+                        title=dict(text=config['label'], font=dict(color='#ccd6f6', size=12)),
+                        tickfont=dict(color='#8892b0', size=10),
+                        thickness=15,
+                        len=0.7
+                    ),
+                    hovertemplate='<b>%{location}</b><br>' +
+                                  f'{config["label"]}: %{{z:{config["format"]}}}<extra></extra>',
+                    marker_line_color='rgba(255,255,255,0.3)',
+                    marker_line_width=0.5
+                ))
+
+                fig.update_layout(
+                    geo=dict(
+                        scope='usa',
+                        bgcolor='rgba(0,0,0,0)',
+                        lakecolor='rgba(0,0,0,0)',
+                        landcolor='#1a1a2e',
+                        showlakes=False,
+                        showland=True
+                    ),
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    margin=dict(l=0, r=0, t=0, b=0),
+                    height=350
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
 
             # State coverage stats in a row
             total_states = len(state_df)
