@@ -777,10 +777,12 @@ def main():
         )
 
     # Load data with selected lookback period
+    # Note: trend_df always uses 12 weeks for consistent historical view and forecasting
+    # The lookback_days filter only affects inventory calculations, not the trend chart
     try:
         distributors_df = load_distributors()
         inventory_df = load_inventory_data(lookback_days=lookback_days)
-        trend_df = load_trend_data(lookback_weeks=max(12, lookback_days // 7))
+        trend_df = load_trend_data(lookback_weeks=12)  # Always 12 weeks for trend/forecast
     except Exception as e:
         st.error(f"Error loading data: {e}")
         return
