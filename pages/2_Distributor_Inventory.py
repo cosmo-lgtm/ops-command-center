@@ -1373,21 +1373,33 @@ def main():
                 'HI': (8, 1),
             }
 
-            # Create data for hex map
+            # Create data for hex map - show ALL states, zeros for those without data
             hex_data = []
-            max_depleted = state_df['total_depleted'].max()
+            max_depleted = state_df['total_depleted'].max() if not state_df.empty else 1
 
-            for _, row in state_df.iterrows():
-                state = row['state']
-                if state in hex_positions:
-                    grid_row, grid_col = hex_positions[state]
+            # Create lookup from state data
+            state_lookup = state_df.set_index('state').to_dict('index') if not state_df.empty else {}
+
+            # Add ALL states from hex_positions
+            for state, (grid_row, grid_col) in hex_positions.items():
+                if state in state_lookup:
                     hex_data.append({
                         'state': state,
                         'row': grid_row,
                         'col': grid_col,
-                        'depleted': row['total_depleted'],
-                        'doors': row['total_doors'],
-                        'pods': row['total_pods']
+                        'depleted': state_lookup[state]['total_depleted'],
+                        'doors': state_lookup[state]['total_doors'],
+                        'pods': state_lookup[state]['total_pods']
+                    })
+                else:
+                    # State with no data - show as zero
+                    hex_data.append({
+                        'state': state,
+                        'row': grid_row,
+                        'col': grid_col,
+                        'depleted': 0,
+                        'doors': 0,
+                        'pods': 0
                     })
 
             hex_df = pd.DataFrame(hex_data)
@@ -1422,7 +1434,7 @@ def main():
                     ),
                     line=dict(color='rgba(255,255,255,0.3)', width=1)
                 ),
-                text=hex_df.apply(lambda r: f"<b>{r['state']}</b><br>{r['depleted']/1000:.1f}K", axis=1),
+                text=hex_df.apply(lambda r: f"<b>{r['state']}</b><br>{r['depleted']/1000:.1f}K" if r['depleted'] > 0 else f"<b>{r['state']}</b><br>0", axis=1),
                 textposition='middle center',
                 textfont=dict(color='white', size=10),
                 hovertemplate='<b>%{customdata[0]}</b><br>' +
