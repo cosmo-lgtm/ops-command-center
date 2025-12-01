@@ -926,8 +926,8 @@ def main():
             apply_dark_theme(fig, height=350,
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#8892b0')),
                 hovermode='x unified',
-                yaxis=dict(title='Order Value ($K)', titlefont=dict(color=COLORS['primary']), tickfont=dict(color=COLORS['primary'])),
-                yaxis2=dict(title='Units Depleted', titlefont=dict(color=COLORS['secondary']), tickfont=dict(color=COLORS['secondary']), anchor='x', overlaying='y', side='right')
+                yaxis=dict(title=dict(text='Order Value ($K)', font=dict(color=COLORS['primary'])), tickfont=dict(color=COLORS['primary'])),
+                yaxis2=dict(title=dict(text='Units Depleted', font=dict(color=COLORS['secondary'])), tickfont=dict(color=COLORS['secondary']), anchor='x', overlaying='y', side='right')
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
