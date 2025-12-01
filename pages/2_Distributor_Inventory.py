@@ -758,7 +758,7 @@ def main():
     """, unsafe_allow_html=True)
 
     # Filter Section - selectors first, then data load uses their values
-    col1, col2, col3 = st.columns([3, 1, 1])
+    col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
 
     with col2:
         lookback_days = st.selectbox(
@@ -769,7 +769,15 @@ def main():
         )
 
     with col3:
-        inventory_threshold = st.selectbox(
+        understock_threshold = st.selectbox(
+            "Understock Threshold",
+            options=[2, 3, 4, 6],
+            index=2,
+            format_func=lambda x: f"{x} weeks"
+        )
+
+    with col4:
+        overstock_threshold = st.selectbox(
             "Overstock Threshold",
             options=[8, 10, 12, 16],
             index=2,
@@ -815,13 +823,13 @@ def main():
         (filtered_df['total_qty_depleted'] > 0)
     ]
 
-    # Status counts based on weeks_of_inventory (using selected threshold)
-    # <4 weeks = Understock, 4-threshold weeks = Balanced, >threshold weeks = Overstock
-    overstock_count = len(has_depletion_df[has_depletion_df['weeks_of_inventory'] > inventory_threshold])
-    understock_count = len(has_depletion_df[has_depletion_df['weeks_of_inventory'] < 4])
+    # Status counts based on weeks_of_inventory (using selected thresholds)
+    # <understock_threshold = Understock, between = Balanced, >overstock_threshold = Overstock
+    overstock_count = len(has_depletion_df[has_depletion_df['weeks_of_inventory'] > overstock_threshold])
+    understock_count = len(has_depletion_df[has_depletion_df['weeks_of_inventory'] < understock_threshold])
     balanced_count = len(has_depletion_df[
-        (has_depletion_df['weeks_of_inventory'] >= 4) &
-        (has_depletion_df['weeks_of_inventory'] <= inventory_threshold)
+        (has_depletion_df['weeks_of_inventory'] >= understock_threshold) &
+        (has_depletion_df['weeks_of_inventory'] <= overstock_threshold)
     ])
     no_depletion_count = len(filtered_df) - len(has_depletion_df)
 
@@ -848,7 +856,7 @@ def main():
         overstock_pct = round(100 * overstock_count / max(has_depletion_total, 1), 1)
         st.markdown(render_metric_card(
             f"{overstock_count} ({overstock_pct}%)",
-            f"Overstocked (>{inventory_threshold} wks)",
+            f"Overstocked (>{overstock_threshold} wks)",
             card_type="warning"
         ), unsafe_allow_html=True)
 
@@ -856,7 +864,7 @@ def main():
         understock_pct = round(100 * understock_count / max(has_depletion_total, 1), 1)
         st.markdown(render_metric_card(
             f"{understock_count} ({understock_pct}%)",
-            "Understocked (<4 wks)",
+            f"Understocked (<{understock_threshold} wks)",
             card_type="danger"
         ), unsafe_allow_html=True)
 
@@ -945,7 +953,7 @@ def main():
 
         # Stacked bar: With Depletion Data (broken down by health)
         fig.add_trace(go.Bar(
-            name='Understock (<4 wks)',
+            name=f'Understock (<{understock_threshold} wks)',
             x=['With Depletion'],
             y=[understock_count_chart],
             marker_color=COLORS['danger'],
@@ -955,7 +963,7 @@ def main():
         ))
 
         fig.add_trace(go.Bar(
-            name=f'Balanced (4-{inventory_threshold} wks)',
+            name=f'Balanced ({understock_threshold}-{overstock_threshold} wks)',
             x=['With Depletion'],
             y=[balanced_count_chart],
             marker_color=COLORS['success'],
@@ -965,7 +973,7 @@ def main():
         ))
 
         fig.add_trace(go.Bar(
-            name=f'Overstock (>{inventory_threshold} wks)',
+            name=f'Overstock (>{overstock_threshold} wks)',
             x=['With Depletion'],
             y=[overstock_count_chart],
             marker_color=COLORS['warning'],
