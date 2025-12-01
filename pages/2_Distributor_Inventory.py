@@ -1438,7 +1438,7 @@ def main():
             state_display['weekly_rate'] = state_display['weekly_rate'].apply(lambda x: f"{x:,.0f}")
             state_display['total_doors'] = state_display['total_doors'].apply(lambda x: f"{x:,.0f}")
             state_display['total_pods'] = state_display['total_pods'].apply(lambda x: f"{x:,.0f}")
-            state_display['avg_pods_per_dist'] = state_display['avg_pods_per_dist'].apply(lambda x: f"{x:,.0f}")
+            state_display['avg_pods_per_dist'] = state_display['avg_pods_per_dist'].apply(lambda x: f"{x:,.1f}")
             state_display.columns = ['State', 'Distributors', 'Total Depleted', 'Doors', 'PODs', 'SKUs/Door', 'Weekly Rate']
 
             st.dataframe(
