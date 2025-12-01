@@ -304,17 +304,17 @@ def load_inventory_data(lookback_days: int = 90):
     ),
 
     -- VIP depletion by distributor (last N days)
+    -- Uses cleaned/deduplicated sales data from analytics.vip_sales_clean
     vip_depletion AS (
         SELECT
-            sl.Dist_Code as distributor_code,
-            SUM(SAFE_CAST(sl.Qty AS INT64)) as qty_depleted,
-            COUNT(DISTINCT sl.Acct_Code) as stores_reached,
+            sc.distributor_code,
+            SUM(sc.quantity) as qty_depleted,
+            COUNT(DISTINCT sc.account_code) as stores_reached,
             COUNT(*) as transaction_count,
-            SUM(SAFE_CAST(sl.Qty AS INT64)) / ({lookback_days} / 7.0) as weekly_depletion_rate
-        FROM `artful-logic-475116-p1.raw_vip.sales_lite` sl
-        WHERE SAFE_CAST(sl.Qty AS INT64) > 0
-            AND SAFE.PARSE_DATE('%Y%m%d', sl.Invoice_Date) >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
-        GROUP BY sl.Dist_Code
+            SUM(sc.quantity) / ({lookback_days} / 7.0) as weekly_depletion_rate
+        FROM `artful-logic-475116-p1.analytics.vip_sales_clean` sc
+        WHERE sc.transaction_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
+        GROUP BY sc.distributor_code
     ),
 
     -- VIP distributor to SF account mapping (child accounts with VIP codes)
@@ -460,30 +460,30 @@ def load_product_level_data(distributor_codes: list = None, lookback_days: int =
         WHERE SupplierItem IS NOT NULL
         QUALIFY ROW_NUMBER() OVER (PARTITION BY SupplierItem ORDER BY _airbyte_extracted_at DESC) = 1
     )
+    -- Uses cleaned/deduplicated sales data from analytics.vip_sales_clean
     SELECT
         d.distributor_code,
         d.distributor_name,
-        sl.Item_Code,
-        COALESCE(i.item_description, sl.Item_Code) as product_name,
+        sc.product_code as Item_Code,
+        COALESCE(i.item_description, sc.product_code) as product_name,
         i.BrandDesc as brand,
-        SUM(SAFE_CAST(sl.Qty AS INT64)) as qty_depleted,
-        COUNT(DISTINCT sl.Acct_Code) as stores_reached,
+        SUM(sc.quantity) as qty_depleted,
+        COUNT(DISTINCT sc.account_code) as stores_reached,
         COUNT(*) as transaction_count,
-        ROUND(SUM(SAFE_CAST(sl.Qty AS INT64)) / ({lookback_days} / 7.0), 1) as weekly_depletion_rate,
+        ROUND(SUM(sc.quantity) / ({lookback_days} / 7.0), 1) as weekly_depletion_rate,
         CASE
-            WHEN SUM(SAFE_CAST(sl.Qty AS INT64)) / ({lookback_days} / 7.0) >= 10 THEN 'High Velocity'
-            WHEN SUM(SAFE_CAST(sl.Qty AS INT64)) / ({lookback_days} / 7.0) >= 3 THEN 'Medium Velocity'
+            WHEN SUM(sc.quantity) / ({lookback_days} / 7.0) >= 10 THEN 'High Velocity'
+            WHEN SUM(sc.quantity) / ({lookback_days} / 7.0) >= 3 THEN 'Medium Velocity'
             ELSE 'Low Velocity'
         END as velocity_status
-    FROM `artful-logic-475116-p1.raw_vip.sales_lite` sl
+    FROM `artful-logic-475116-p1.analytics.vip_sales_clean` sc
     JOIN `artful-logic-475116-p1.staging_vip.distributor_fact_sheet_v2` d
-        ON sl.Dist_Code = d.distributor_code
+        ON sc.distributor_code = d.distributor_code
     LEFT JOIN items_deduped i
-        ON sl.Item_Code = i.item_code
-    WHERE SAFE_CAST(sl.Qty AS INT64) > 0
-        AND SAFE.PARSE_DATE('%Y%m%d', sl.Invoice_Date) >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
+        ON sc.product_code = i.item_code
+    WHERE sc.transaction_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
         {distributor_filter}
-    GROUP BY d.distributor_code, d.distributor_name, sl.Item_Code, i.item_description, i.BrandDesc
+    GROUP BY d.distributor_code, d.distributor_name, sc.product_code, i.item_description, i.BrandDesc
     ORDER BY d.distributor_name, qty_depleted DESC
     """
     return client.query(query).to_dataframe()
@@ -495,18 +495,18 @@ def load_state_depletion_data(lookback_days: int = 90):
     client = get_bq_client()
 
     query = f"""
+    -- Uses cleaned/deduplicated sales data from analytics.vip_sales_clean
     WITH state_depletion AS (
         SELECT
             d.state,
             d.distributor_code,
             CAST(d.total_retailers AS INT64) as total_retailers,
-            SUM(SAFE_CAST(sl.Qty AS INT64)) as qty_depleted,
-            COUNT(DISTINCT sl.Acct_Code) as stores_reached
-        FROM `artful-logic-475116-p1.raw_vip.sales_lite` sl
+            SUM(sc.quantity) as qty_depleted,
+            COUNT(DISTINCT sc.account_code) as stores_reached
+        FROM `artful-logic-475116-p1.analytics.vip_sales_clean` sc
         JOIN `artful-logic-475116-p1.staging_vip.distributor_fact_sheet_v2` d
-            ON sl.Dist_Code = d.distributor_code
-        WHERE SAFE_CAST(sl.Qty AS INT64) > 0
-            AND SAFE.PARSE_DATE('%Y%m%d', sl.Invoice_Date) >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
+            ON sc.distributor_code = d.distributor_code
+        WHERE sc.transaction_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
             AND d.state IS NOT NULL
             AND LENGTH(d.state) = 2
         GROUP BY d.state, d.distributor_code, d.total_retailers
@@ -548,15 +548,14 @@ def load_trend_data(lookback_weeks: int = 12):
         GROUP BY week_start
     ),
 
-    -- Weekly VIP depletion
+    -- Weekly VIP depletion (uses cleaned/deduplicated sales data)
     weekly_depletion AS (
         SELECT
-            DATE_TRUNC(SAFE.PARSE_DATE('%Y%m%d', Invoice_Date), WEEK) as week_start,
-            SUM(SAFE_CAST(Qty AS INT64)) as qty_depleted,
-            COUNT(DISTINCT Acct_Code) as stores_reached
-        FROM `artful-logic-475116-p1.raw_vip.sales_lite`
-        WHERE SAFE_CAST(Qty AS INT64) > 0
-            AND SAFE.PARSE_DATE('%Y%m%d', Invoice_Date) >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_weeks} WEEK)
+            DATE_TRUNC(transaction_date, WEEK) as week_start,
+            SUM(quantity) as qty_depleted,
+            COUNT(DISTINCT account_code) as stores_reached
+        FROM `artful-logic-475116-p1.analytics.vip_sales_clean`
+        WHERE transaction_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_weeks} WEEK)
         GROUP BY week_start
     )
 
