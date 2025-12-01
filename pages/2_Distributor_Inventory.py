@@ -1401,13 +1401,13 @@ def main():
             # Normalize for color scale
             hex_df['color_val'] = hex_df['depleted'] / max_depleted if max_depleted > 0 else 0
 
-            # Add hexagons as markers
+            # Add hexagons as markers - scale positions for proper spacing
             fig.add_trace(go.Scatter(
-                x=hex_df['col'],
-                y=-hex_df['row'],  # Negative to flip y-axis (row 0 at top)
+                x=hex_df['col'] * 50,  # Scale up for spacing
+                y=-hex_df['row'] * 50,  # Negative to flip y-axis (row 0 at top)
                 mode='markers+text',
                 marker=dict(
-                    size=55,
+                    size=40,
                     symbol='hexagon',
                     color=hex_df['depleted'],
                     colorscale=[
@@ -1425,9 +1425,9 @@ def main():
                     ),
                     line=dict(color='rgba(255,255,255,0.3)', width=1)
                 ),
-                text=hex_df.apply(lambda r: f"<b>{r['state']}</b><br>{r['depleted']/1000:.1f}K" if r['depleted'] > 0 else f"<b>{r['state']}</b><br>0", axis=1),
+                text=hex_df.apply(lambda r: f"{r['state']}<br>{r['depleted']/1000:.0f}K" if r['depleted'] >= 1000 else f"{r['state']}<br>{int(r['depleted'])}", axis=1),
                 textposition='middle center',
-                textfont=dict(color='white', size=10),
+                textfont=dict(color='white', size=9),
                 hovertemplate='<b>%{customdata[0]}</b><br>' +
                               'Depleted: %{customdata[1]:,.0f}<br>' +
                               'Doors: %{customdata[2]:,.0f}<br>' +
@@ -1438,9 +1438,9 @@ def main():
             fig.update_layout(
                 paper_bgcolor='rgba(0,0,0,0)',
                 plot_bgcolor='rgba(0,0,0,0)',
-                margin=dict(l=20, r=20, t=20, b=20),
-                height=400,
-                xaxis=dict(visible=False, range=[-1, 14]),
+                margin=dict(l=10, r=80, t=10, b=10),
+                height=380,
+                xaxis=dict(visible=False),
                 yaxis=dict(visible=False, scaleanchor='x', scaleratio=1),
                 showlegend=False
             )
