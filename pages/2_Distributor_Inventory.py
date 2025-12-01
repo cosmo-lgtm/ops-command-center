@@ -757,10 +757,10 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # Filter Section - selectors first, then data load uses their values
-    col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+    # Sidebar filters for cleaner main view
+    with st.sidebar:
+        st.markdown("### Filters")
 
-    with col2:
         lookback_days = st.selectbox(
             "Lookback Period",
             options=[30, 60, 90, 180],
@@ -768,20 +768,18 @@ def main():
             format_func=lambda x: f"{x} days"
         )
 
-    with col3:
         understock_threshold = st.selectbox(
             "Understock Threshold",
             options=[2, 3, 4, 6],
             index=2,
-            format_func=lambda x: f"{x} weeks"
+            format_func=lambda x: f"< {x} weeks"
         )
 
-    with col4:
         overstock_threshold = st.selectbox(
             "Overstock Threshold",
             options=[8, 10, 12, 16],
             index=2,
-            format_func=lambda x: f"{x} weeks"
+            format_func=lambda x: f"> {x} weeks"
         )
 
     # Load data with selected lookback period
@@ -797,14 +795,14 @@ def main():
         st.error(f"Error loading data: {e}")
         return
 
-    with col1:
-        # Distributor multiselect (after data load so we have the options)
+    # Distributor filter in sidebar (after data load so we have the options)
+    with st.sidebar:
         distributor_options = ["All Distributors"] + sorted(inventory_df['distributor_name'].dropna().unique().tolist())
         selected_distributors = st.multiselect(
-            "Select Distributors",
+            "Filter Distributors",
             options=distributor_options,
             default=["All Distributors"],
-            help="Select one or more distributors to filter the analysis"
+            help="Select specific distributors to analyze"
         )
 
     # Filter the data based on selection
@@ -836,48 +834,136 @@ def main():
     no_depletion_count = len(filtered_df) - len(has_depletion_df)
 
     avg_weeks = has_depletion_df[has_depletion_df['weeks_of_inventory'].notna() & (has_depletion_df['weeks_of_inventory'] > 0)]['weeks_of_inventory'].mean()
+    has_depletion_total = len(has_depletion_df)
+    overstock_pct = round(100 * overstock_count / max(has_depletion_total, 1), 1)
+    understock_pct = round(100 * understock_count / max(has_depletion_total, 1), 1)
+    balanced_pct = round(100 * balanced_count / max(has_depletion_total, 1), 1)
 
-    # KPI Cards Row
-    col1, col2, col3, col4, col5 = st.columns(5)
+    # Inventory Health Summary Table
+    st.markdown("""
+    <div style="background: linear-gradient(145deg, #1e1e2f 0%, #2a2a4a 100%); border-radius: 16px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 24px;">
+        <h3 style="color: #ccd6f6; margin: 0 0 20px 0; font-size: 18px; font-weight: 600;">📊 Inventory Health Summary</h3>
+        <table style="width: 100%; border-collapse: collapse; color: #ccd6f6;">
+            <thead>
+                <tr style="border-bottom: 2px solid rgba(255,255,255,0.1);">
+                    <th style="text-align: left; padding: 12px 8px; color: #8892b0; font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Metric</th>
+                    <th style="text-align: right; padding: 12px 8px; color: #8892b0; font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Value</th>
+                    <th style="text-align: right; padding: 12px 8px; color: #8892b0; font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">% of Total</th>
+                    <th style="text-align: center; padding: 12px 8px; color: #8892b0; font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <td style="padding: 14px 8px; font-size: 14px;">Active Distributors</td>
+                    <td style="text-align: right; padding: 14px 8px; font-size: 18px; font-weight: 600; color: #00d4aa;">{total_distributors:,}</td>
+                    <td style="text-align: right; padding: 14px 8px; color: #8892b0;">—</td>
+                    <td style="text-align: center; padding: 14px 8px;"><span style="background: rgba(0, 212, 170, 0.2); color: #00d4aa; padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 600;">TRACKED</span></td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <td style="padding: 14px 8px; font-size: 14px;">Order Value ({lookback_days}d)</td>
+                    <td style="text-align: right; padding: 14px 8px; font-size: 18px; font-weight: 600; color: #00d4aa;">${total_order_value/1000000:.1f}M</td>
+                    <td style="text-align: right; padding: 14px 8px; color: #8892b0;">—</td>
+                    <td style="text-align: center; padding: 14px 8px;"><span style="background: rgba(0, 212, 170, 0.2); color: #00d4aa; padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 600;">REVENUE</span></td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <td style="padding: 14px 8px; font-size: 14px;">🔴 Understocked (&lt;{understock_threshold} wks)</td>
+                    <td style="text-align: right; padding: 14px 8px; font-size: 18px; font-weight: 600; color: #ff6b6b;">{understock_count}</td>
+                    <td style="text-align: right; padding: 14px 8px; font-size: 14px; color: #ff6b6b;">{understock_pct}%</td>
+                    <td style="text-align: center; padding: 14px 8px;"><span style="background: rgba(255, 107, 107, 0.2); color: #ff6b6b; padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 600;">ACTION NEEDED</span></td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <td style="padding: 14px 8px; font-size: 14px;">🟡 Overstocked (&gt;{overstock_threshold} wks)</td>
+                    <td style="text-align: right; padding: 14px 8px; font-size: 18px; font-weight: 600; color: #ffd666;">{overstock_count}</td>
+                    <td style="text-align: right; padding: 14px 8px; font-size: 14px; color: #ffd666;">{overstock_pct}%</td>
+                    <td style="text-align: center; padding: 14px 8px;"><span style="background: rgba(255, 214, 102, 0.2); color: #ffd666; padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 600;">MONITOR</span></td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <td style="padding: 14px 8px; font-size: 14px;">🟢 Balanced ({understock_threshold}-{overstock_threshold} wks)</td>
+                    <td style="text-align: right; padding: 14px 8px; font-size: 18px; font-weight: 600; color: #00d4aa;">{balanced_count}</td>
+                    <td style="text-align: right; padding: 14px 8px; font-size: 14px; color: #00d4aa;">{balanced_pct}%</td>
+                    <td style="text-align: center; padding: 14px 8px;"><span style="background: rgba(0, 212, 170, 0.2); color: #00d4aa; padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 600;">HEALTHY</span></td>
+                </tr>
+                <tr>
+                    <td style="padding: 14px 8px; font-size: 14px;">⚪ No Depletion Data</td>
+                    <td style="text-align: right; padding: 14px 8px; font-size: 18px; font-weight: 600; color: #8892b0;">{no_depletion_count}</td>
+                    <td style="text-align: right; padding: 14px 8px; color: #8892b0;">—</td>
+                    <td style="text-align: center; padding: 14px 8px;"><span style="background: rgba(136, 146, 176, 0.2); color: #8892b0; padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 600;">NO VIP DATA</span></td>
+                </tr>
+            </tbody>
+            <tfoot>
+                <tr style="border-top: 2px solid rgba(255,255,255,0.1);">
+                    <td style="padding: 14px 8px; font-size: 14px; font-weight: 600;">Avg Weeks of Inventory</td>
+                    <td style="text-align: right; padding: 14px 8px; font-size: 18px; font-weight: 600; color: #667eea;">{avg_weeks:.1f}</td>
+                    <td style="text-align: right; padding: 14px 8px; color: #8892b0;">—</td>
+                    <td style="text-align: center; padding: 14px 8px;"><span style="background: rgba(102, 126, 234, 0.2); color: #667eea; padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 600;">WEEKS</span></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+    """.format(
+        total_distributors=total_distributors,
+        lookback_days=lookback_days,
+        total_order_value=total_order_value,
+        understock_threshold=understock_threshold,
+        understock_count=understock_count,
+        understock_pct=understock_pct,
+        overstock_threshold=overstock_threshold,
+        overstock_count=overstock_count,
+        overstock_pct=overstock_pct,
+        balanced_count=balanced_count,
+        balanced_pct=balanced_pct,
+        no_depletion_count=no_depletion_count,
+        avg_weeks=avg_weeks if pd.notna(avg_weeks) else 0
+    ), unsafe_allow_html=True)
 
-    with col1:
-        st.markdown(render_metric_card(
-            f"{total_distributors:,}",
-            "Active Distributors"
-        ), unsafe_allow_html=True)
+    # Action Items: Top Understocked + Top Overstocked (using threshold-based logic)
+    # Placed right after KPIs for immediate visibility
+    st.markdown('<p class="section-header">⚡ Action Items</p>', unsafe_allow_html=True)
+    action_col1, action_col2 = st.columns(2)
 
-    with col2:
-        st.markdown(render_metric_card(
-            f"${total_order_value/1000000:.1f}M",
-            f"Order Value ({lookback_days}d)"
-        ), unsafe_allow_html=True)
+    # Use weeks_of_inventory thresholds, not inventory_status field
+    overstock_df = has_depletion_df[has_depletion_df['weeks_of_inventory'] > overstock_threshold].nlargest(10, 'weeks_of_inventory')
+    understock_df_chart = has_depletion_df[has_depletion_df['weeks_of_inventory'] < understock_threshold].nsmallest(10, 'weeks_of_inventory')
 
-    with col3:
-        # Percentage based on distributors WITH depletion data (those we can classify)
-        has_depletion_total = len(has_depletion_df)
-        overstock_pct = round(100 * overstock_count / max(has_depletion_total, 1), 1)
-        st.markdown(render_metric_card(
-            f"{overstock_count} ({overstock_pct}%)",
-            f"Overstocked (>{overstock_threshold} wks)",
-            card_type="warning"
-        ), unsafe_allow_html=True)
+    with action_col1:
+        st.markdown(f'<p style="color: #ff6b6b; font-size: 16px; font-weight: 600; margin-bottom: 10px;">🔴 Understocked (<{understock_threshold} wks) - Need Reorder</p>', unsafe_allow_html=True)
 
-    with col4:
-        understock_pct = round(100 * understock_count / max(has_depletion_total, 1), 1)
-        st.markdown(render_metric_card(
-            f"{understock_count} ({understock_pct}%)",
-            f"Understocked (<{understock_threshold} wks)",
-            card_type="danger"
-        ), unsafe_allow_html=True)
+        if not understock_df_chart.empty:
+            fig = go.Figure(go.Bar(
+                x=understock_df_chart['weeks_of_inventory'],
+                y=understock_df_chart['distributor_name'],
+                orientation='h',
+                marker=dict(color=COLORS['danger']),
+                text=understock_df_chart['weeks_of_inventory'].apply(lambda x: f'{x:.1f} wks'),
+                textposition='outside',
+                textfont=dict(color='#ccd6f6'),
+                hovertemplate='%{y}<br>Weeks: %{x:.1f}<extra></extra>'
+            ))
 
-    with col5:
-        avg_weeks_display = f"{avg_weeks:.1f}" if pd.notna(avg_weeks) else "N/A"
-        st.markdown(render_metric_card(
-            avg_weeks_display,
-            "Avg Weeks Inventory"
-        ), unsafe_allow_html=True)
+            apply_dark_theme(fig, height=300, margin=dict(l=0, r=50, t=10, b=0), yaxis={'autorange': 'reversed'})
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.success("No understocked distributors - inventory levels healthy!")
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    with action_col2:
+        st.markdown(f'<p style="color: #ffd666; font-size: 16px; font-weight: 600; margin-bottom: 10px;">🟡 Overstocked (>{overstock_threshold} wks) - Monitor</p>', unsafe_allow_html=True)
+
+        if not overstock_df.empty:
+            fig = go.Figure(go.Bar(
+                x=overstock_df['weeks_of_inventory'],
+                y=overstock_df['distributor_name'],
+                orientation='h',
+                marker=dict(color=COLORS['warning']),
+                text=overstock_df['weeks_of_inventory'].apply(lambda x: f'{x:.0f} wks'),
+                textposition='outside',
+                textfont=dict(color='#ccd6f6'),
+                hovertemplate='%{y}<br>Weeks: %{x:.1f}<extra></extra>'
+            ))
+
+            apply_dark_theme(fig, height=300, margin=dict(l=0, r=50, t=10, b=0), yaxis={'autorange': 'reversed'})
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No overstocked distributors")
 
     # Charts Row 1: Trend + Status Distribution
     col1, col2 = st.columns([2, 1])
@@ -1178,319 +1264,288 @@ def main():
                 fig_depl.update_layout(yaxis_title="Units Depleted")
                 st.plotly_chart(fig_depl, use_container_width=True)
 
-            # Forecast summary metrics - side by side: Orders (left) | Depletion (right)
-            mcol1, mcol2 = st.columns(2)
+            # Forecast summary table - clean tabular view
+            o_first = forecast_df.head(6)['orders_ensemble'].mean()
+            o_second = forecast_df.tail(6)['orders_ensemble'].mean()
+            o_trend = ((o_second - o_first) / o_first * 100) if o_first > 0 else 0
+            orders_4wk = forecast_df.head(4)['orders_ensemble'].sum()
+            orders_8wk = forecast_df.head(8)['orders_ensemble'].sum()
+            orders_12wk = forecast_df['orders_ensemble'].sum()
 
-            with mcol1:
-                st.markdown('<p style="color: #ccd6f6; font-size: 14px; margin-top: 10px;">📦 <b>Orders Forecast</b></p>', unsafe_allow_html=True)
-                ocol1, ocol2 = st.columns(2)
-                with ocol1:
-                    o_first = forecast_df.head(6)['orders_ensemble'].mean()
-                    o_second = forecast_df.tail(6)['orders_ensemble'].mean()
-                    o_trend = ((o_second - o_first) / o_first * 100) if o_first > 0 else 0
-                    o_label = "Trending Up" if o_trend > 5 else ("Trending Down" if o_trend < -5 else "Stable")
-                    o_type = "primary" if o_trend > 5 else ("danger" if o_trend < -5 else "warning")
-                    st.markdown(render_metric_card(f"{o_trend:+.1f}%", o_label, o_type), unsafe_allow_html=True)
-                with ocol2:
-                    orders_4wk = forecast_df.head(4)['orders_ensemble'].sum()
-                    st.markdown(render_metric_card(f"${orders_4wk:,.0f}", "Next 4 Weeks", "primary"), unsafe_allow_html=True)
+            d_first = forecast_df.head(6)['depletion_ensemble'].mean()
+            d_second = forecast_df.tail(6)['depletion_ensemble'].mean()
+            d_trend = ((d_second - d_first) / d_first * 100) if d_first > 0 else 0
+            depl_4wk = forecast_df.head(4)['depletion_ensemble'].sum()
+            depl_8wk = forecast_df.head(8)['depletion_ensemble'].sum()
+            depl_12wk = forecast_df['depletion_ensemble'].sum()
 
-                ocol3, ocol4 = st.columns(2)
-                with ocol3:
-                    orders_8wk = forecast_df.head(8)['orders_ensemble'].sum()
-                    st.markdown(render_metric_card(f"${orders_8wk:,.0f}", "Next 8 Weeks", "primary"), unsafe_allow_html=True)
-                with ocol4:
-                    orders_12wk = forecast_df['orders_ensemble'].sum()
-                    st.markdown(render_metric_card(f"${orders_12wk:,.0f}", "Next 12 Weeks", "primary"), unsafe_allow_html=True)
+            o_trend_color = "#00d4aa" if o_trend > 5 else ("#ff6b6b" if o_trend < -5 else "#ffd666")
+            d_trend_color = "#00d4aa" if d_trend > 5 else ("#ff6b6b" if d_trend < -5 else "#ffd666")
+            o_trend_label = "▲" if o_trend > 5 else ("▼" if o_trend < -5 else "—")
+            d_trend_label = "▲" if d_trend > 5 else ("▼" if d_trend < -5 else "—")
 
-            with mcol2:
-                st.markdown('<p style="color: #ccd6f6; font-size: 14px; margin-top: 10px;">📉 <b>Depletion Forecast</b></p>', unsafe_allow_html=True)
-                dcol1, dcol2 = st.columns(2)
-                with dcol1:
-                    d_first = forecast_df.head(6)['depletion_ensemble'].mean()
-                    d_second = forecast_df.tail(6)['depletion_ensemble'].mean()
-                    d_trend = ((d_second - d_first) / d_first * 100) if d_first > 0 else 0
-                    d_label = "Trending Up" if d_trend > 5 else ("Trending Down" if d_trend < -5 else "Stable")
-                    d_type = "primary" if d_trend > 5 else ("danger" if d_trend < -5 else "warning")
-                    st.markdown(render_metric_card(f"{d_trend:+.1f}%", d_label, d_type), unsafe_allow_html=True)
-                with dcol2:
-                    depl_4wk = forecast_df.head(4)['depletion_ensemble'].sum()
-                    st.markdown(render_metric_card(f"{depl_4wk:,.0f} units", "Next 4 Weeks", "primary"), unsafe_allow_html=True)
-
-                dcol3, dcol4 = st.columns(2)
-                with dcol3:
-                    depl_8wk = forecast_df.head(8)['depletion_ensemble'].sum()
-                    st.markdown(render_metric_card(f"{depl_8wk:,.0f} units", "Next 8 Weeks", "primary"), unsafe_allow_html=True)
-                with dcol4:
-                    depl_12wk = forecast_df['depletion_ensemble'].sum()
-                    st.markdown(render_metric_card(f"{depl_12wk:,.0f} units", "Next 12 Weeks", "primary"), unsafe_allow_html=True)
+            st.markdown("""
+            <div style="background: linear-gradient(145deg, #1e1e2f 0%, #2a2a4a 100%); border-radius: 16px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); margin-top: 20px;">
+                <h3 style="color: #ccd6f6; margin: 0 0 20px 0; font-size: 18px; font-weight: 600;">📈 Forecast Summary</h3>
+                <table style="width: 100%; border-collapse: collapse; color: #ccd6f6;">
+                    <thead>
+                        <tr style="border-bottom: 2px solid rgba(255,255,255,0.1);">
+                            <th style="text-align: left; padding: 12px 8px; color: #8892b0; font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Metric</th>
+                            <th style="text-align: center; padding: 12px 8px; color: #8892b0; font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Trend</th>
+                            <th style="text-align: right; padding: 12px 8px; color: #8892b0; font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Next 4 Wks</th>
+                            <th style="text-align: right; padding: 12px 8px; color: #8892b0; font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Next 8 Wks</th>
+                            <th style="text-align: right; padding: 12px 8px; color: #8892b0; font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Next 12 Wks</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                            <td style="padding: 16px 8px; font-size: 14px;">📦 Orders (Revenue)</td>
+                            <td style="text-align: center; padding: 16px 8px;"><span style="color: {o_trend_color}; font-size: 16px; font-weight: 600;">{o_trend_label} {o_trend:+.1f}%</span></td>
+                            <td style="text-align: right; padding: 16px 8px; font-size: 16px; font-weight: 600; color: #667eea;">${orders_4wk/1000000:.2f}M</td>
+                            <td style="text-align: right; padding: 16px 8px; font-size: 16px; font-weight: 600; color: #667eea;">${orders_8wk/1000000:.2f}M</td>
+                            <td style="text-align: right; padding: 16px 8px; font-size: 16px; font-weight: 600; color: #667eea;">${orders_12wk/1000000:.2f}M</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 16px 8px; font-size: 14px;">📉 Depletion (Units)</td>
+                            <td style="text-align: center; padding: 16px 8px;"><span style="color: {d_trend_color}; font-size: 16px; font-weight: 600;">{d_trend_label} {d_trend:+.1f}%</span></td>
+                            <td style="text-align: right; padding: 16px 8px; font-size: 16px; font-weight: 600; color: #00d4aa;">{depl_4wk:,.0f}</td>
+                            <td style="text-align: right; padding: 16px 8px; font-size: 16px; font-weight: 600; color: #00d4aa;">{depl_8wk:,.0f}</td>
+                            <td style="text-align: right; padding: 16px 8px; font-size: 16px; font-weight: 600; color: #00d4aa;">{depl_12wk:,.0f}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            """.format(
+                o_trend_color=o_trend_color,
+                o_trend_label=o_trend_label,
+                o_trend=o_trend,
+                orders_4wk=orders_4wk,
+                orders_8wk=orders_8wk,
+                orders_12wk=orders_12wk,
+                d_trend_color=d_trend_color,
+                d_trend_label=d_trend_label,
+                d_trend=d_trend,
+                depl_4wk=depl_4wk,
+                depl_8wk=depl_8wk,
+                depl_12wk=depl_12wk
+            ), unsafe_allow_html=True)
 
         else:
             st.info("Not enough historical data to generate forecast (need at least 4 weeks)")
     else:
         st.info("No trend data available for forecasting")
 
-    # Charts Row 2: Top Overstocked + Top Understocked
-    col1, col2 = st.columns(2)
+    # Distributor Detail Table (collapsible)
+    with st.expander("📋 Distributor Inventory Details", expanded=False):
+        display_df = filtered_df[[
+            'distributor_name', 'vip_codes', 'total_qty_ordered', 'total_qty_depleted',
+            'order_depletion_ratio', 'weeks_of_inventory', 'inventory_status',
+            'total_order_value', 'has_vip_match'
+        ]].copy()
 
-    with col1:
-        st.markdown('<p class="section-header">Top Overstocked Distributors</p>', unsafe_allow_html=True)
+        display_df['total_order_value'] = display_df['total_order_value'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "N/A")
+        display_df['weeks_of_inventory'] = display_df['weeks_of_inventory'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "N/A")
+        display_df['order_depletion_ratio'] = display_df['order_depletion_ratio'].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
+        display_df['has_vip_match'] = display_df['has_vip_match'].apply(lambda x: "Yes" if x else "No")
+        display_df['vip_codes'] = display_df['vip_codes'].fillna('-')
+        display_df.columns = ['Distributor', 'VIP Codes', 'Qty Ordered', 'Qty Depleted', 'O/D Ratio', 'Weeks Inv', 'Status', 'Order Value', 'VIP Match']
 
-        overstock_df = filtered_df[filtered_df['inventory_status'] == 'Overstock'].nlargest(10, 'weeks_of_inventory')
+        st.dataframe(
+            display_df.sort_values('Qty Ordered', ascending=False),
+            use_container_width=True,
+            hide_index=True,
+            height=400
+        )
 
-        if not overstock_df.empty:
-            fig = go.Figure(go.Bar(
-                x=overstock_df['weeks_of_inventory'],
-                y=overstock_df['distributor_name'],
-                orientation='h',
-                marker=dict(color=COLORS['warning']),
-                text=overstock_df['weeks_of_inventory'].apply(lambda x: f'{x:.0f} wks'),
-                textposition='outside',
-                textfont=dict(color='#ccd6f6'),
-                hovertemplate='%{y}<br>Weeks: %{x:.1f}<extra></extra>'
-            ))
+    # Product-Level Analysis Section (collapsible)
+    with st.expander("📦 Product-Level Depletion Analysis", expanded=False):
+        # Load product data for selected distributors
+        selected_codes = None
+        if "All Distributors" not in selected_distributors and len(selected_distributors) > 0:
+            selected_codes = filtered_df['distributor_code'].tolist()
 
-            apply_dark_theme(fig, height=350, margin=dict(l=0, r=50, t=10, b=0), yaxis={'autorange': 'reversed'})
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No overstocked distributors found")
+        try:
+            product_df = load_product_level_data(distributor_codes=selected_codes, lookback_days=lookback_days)
 
-    with col2:
-        st.markdown('<p class="section-header">Top Understocked Distributors</p>', unsafe_allow_html=True)
+            if not product_df.empty:
+                # Top products by depletion
+                col1, col2 = st.columns(2)
 
-        understock_df = filtered_df[filtered_df['inventory_status'] == 'Understock'].nsmallest(10, 'weeks_of_inventory')
+                with col1:
+                    st.markdown("**Top Products by Depletion Volume**")
+                    top_products = product_df.groupby('product_name').agg({
+                        'qty_depleted': 'sum',
+                        'stores_reached': 'sum',
+                        'transaction_count': 'sum'
+                    }).nlargest(15, 'qty_depleted').reset_index()
 
-        if not understock_df.empty:
-            fig = go.Figure(go.Bar(
-                x=understock_df['weeks_of_inventory'],
-                y=understock_df['distributor_name'],
-                orientation='h',
-                marker=dict(color=COLORS['danger']),
-                text=understock_df['weeks_of_inventory'].apply(lambda x: f'{x:.1f} wks'),
-                textposition='outside',
-                textfont=dict(color='#ccd6f6'),
-                hovertemplate='%{y}<br>Weeks: %{x:.1f}<extra></extra>'
-            ))
+                    fig = go.Figure(go.Bar(
+                        x=top_products['qty_depleted'],
+                        y=top_products['product_name'],
+                        orientation='h',
+                        marker=dict(
+                            color=top_products['qty_depleted'],
+                            colorscale=[[0, COLORS['secondary']], [1, COLORS['primary']]],
+                        ),
+                        hovertemplate='%{y}<br>Depleted: %{x:,}<extra></extra>'
+                    ))
 
-            apply_dark_theme(fig, height=350, margin=dict(l=0, r=50, t=10, b=0), yaxis={'autorange': 'reversed'})
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No understocked distributors found")
+                    apply_dark_theme(fig, height=400, margin=dict(l=0, r=0, t=10, b=0), yaxis={'autorange': 'reversed'})
+                    st.plotly_chart(fig, use_container_width=True)
 
-    # Distributor Detail Table
-    st.markdown('<p class="section-header">Distributor Inventory Summary</p>', unsafe_allow_html=True)
+                with col2:
+                    st.markdown("**Product Velocity Distribution**")
+                    velocity_counts = product_df['velocity_status'].value_counts().reset_index()
+                    velocity_counts.columns = ['Velocity', 'Count']
 
-    display_df = filtered_df[[
-        'distributor_name', 'vip_codes', 'total_qty_ordered', 'total_qty_depleted',
-        'order_depletion_ratio', 'weeks_of_inventory', 'inventory_status',
-        'total_order_value', 'has_vip_match'
-    ]].copy()
+                    fig = go.Figure(data=[go.Pie(
+                        labels=velocity_counts['Velocity'],
+                        values=velocity_counts['Count'],
+                        hole=0.5,
+                        marker=dict(colors=[COLORS['success'], COLORS['warning'], COLORS['info']]),
+                        textinfo='label+percent',
+                        textposition='outside',
+                        textfont=dict(color='#ccd6f6')
+                    )])
 
-    display_df['total_order_value'] = display_df['total_order_value'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "N/A")
-    display_df['weeks_of_inventory'] = display_df['weeks_of_inventory'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "N/A")
-    display_df['order_depletion_ratio'] = display_df['order_depletion_ratio'].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
-    display_df['has_vip_match'] = display_df['has_vip_match'].apply(lambda x: "Yes" if x else "No")
-    display_df['vip_codes'] = display_df['vip_codes'].fillna('-')
-    display_df.columns = ['Distributor', 'VIP Codes', 'Qty Ordered', 'Qty Depleted', 'O/D Ratio', 'Weeks Inv', 'Status', 'Order Value', 'VIP Match']
+                    apply_dark_theme(fig, height=400, showlegend=False)
+                    st.plotly_chart(fig, use_container_width=True)
 
-    st.dataframe(
-        display_df.sort_values('Qty Ordered', ascending=False),
-        use_container_width=True,
-        hide_index=True,
-        height=400
-    )
+            else:
+                st.info("No product-level data available for selected filters")
+        except Exception as e:
+            st.warning(f"Could not load product-level data: {e}")
 
-    # Product-Level Analysis Section
-    st.markdown('<p class="section-header">Product-Level Depletion Analysis</p>', unsafe_allow_html=True)
+    # US State Map with metric selector (collapsible)
+    with st.expander("🗺️ Performance by State", expanded=False):
+        try:
+            state_df = load_state_depletion_data(lookback_days=lookback_days)
 
-    # Load product data for selected distributors
-    selected_codes = None
-    if "All Distributors" not in selected_distributors and len(selected_distributors) > 0:
-        selected_codes = filtered_df['distributor_code'].tolist()
+            if not state_df.empty:
+                # Calculate avg PODs per door
+                state_df['avg_pods'] = state_df['total_pods'] / state_df['total_doors'].replace(0, 1)
 
-    try:
-        product_df = load_product_level_data(distributor_codes=selected_codes, lookback_days=lookback_days)
+                # Metric selector and map in columns
+                map_col, selector_col = st.columns([4, 1])
 
-        if not product_df.empty:
-            # Top products by depletion
-            col1, col2 = st.columns(2)
+                with selector_col:
+                    map_metric = st.radio(
+                        "Metric",
+                        options=['Depletion', 'Doors', 'Total PODs', 'Avg PODs/Door'],
+                        index=0,
+                        key='map_metric_selector'
+                    )
 
-            with col1:
-                st.markdown("**Top Products by Depletion Volume**")
-                top_products = product_df.groupby('product_name').agg({
-                    'qty_depleted': 'sum',
-                    'stores_reached': 'sum',
-                    'transaction_count': 'sum'
-                }).nlargest(15, 'qty_depleted').reset_index()
+                # Map metric to data column and labels
+                metric_config = {
+                    'Depletion': {'col': 'total_depleted', 'label': 'Units', 'format': ',.0f'},
+                    'Doors': {'col': 'total_doors', 'label': 'Doors', 'format': ',.0f'},
+                    'Total PODs': {'col': 'total_pods', 'label': 'PODs', 'format': ',.0f'},
+                    'Avg PODs/Door': {'col': 'avg_pods', 'label': 'Avg PODs', 'format': ',.1f'}
+                }
 
-                fig = go.Figure(go.Bar(
-                    x=top_products['qty_depleted'],
-                    y=top_products['product_name'],
-                    orientation='h',
-                    marker=dict(
-                        color=top_products['qty_depleted'],
-                        colorscale=[[0, COLORS['secondary']], [1, COLORS['primary']]],
-                    ),
-                    hovertemplate='%{y}<br>Depleted: %{x:,}<extra></extra>'
-                ))
+                config = metric_config[map_metric]
 
-                apply_dark_theme(fig, height=400, margin=dict(l=0, r=0, t=10, b=0), yaxis={'autorange': 'reversed'})
-                st.plotly_chart(fig, use_container_width=True)
+                with map_col:
+                    # Create choropleth map
+                    fig = go.Figure(data=go.Choropleth(
+                        locations=state_df['state'],
+                        z=state_df[config['col']],
+                        locationmode='USA-states',
+                        colorscale=[
+                            [0, '#1a1a2e'],
+                            [0.2, '#0f3460'],
+                            [0.5, '#00a3cc'],
+                            [0.8, '#00d4aa'],
+                            [1, '#64ffda']
+                        ],
+                        colorbar=dict(
+                            title=dict(text=config['label'], font=dict(color='#ccd6f6', size=12)),
+                            tickfont=dict(color='#8892b0', size=10),
+                            thickness=15,
+                            len=0.7
+                        ),
+                        hovertemplate='<b>%{location}</b><br>' +
+                                      f'{config["label"]}: %{{z:{config["format"]}}}<extra></extra>',
+                        marker_line_color='rgba(255,255,255,0.3)',
+                        marker_line_width=0.5
+                    ))
 
-            with col2:
-                st.markdown("**Product Velocity Distribution**")
-                velocity_counts = product_df['velocity_status'].value_counts().reset_index()
-                velocity_counts.columns = ['Velocity', 'Count']
+                    fig.update_layout(
+                        geo=dict(
+                            scope='usa',
+                            bgcolor='rgba(0,0,0,0)',
+                            lakecolor='rgba(0,0,0,0)',
+                            landcolor='#1a1a2e',
+                            showlakes=False,
+                            showland=True
+                        ),
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        margin=dict(l=0, r=0, t=0, b=0),
+                        height=350
+                    )
 
-                fig = go.Figure(data=[go.Pie(
-                    labels=velocity_counts['Velocity'],
-                    values=velocity_counts['Count'],
-                    hole=0.5,
-                    marker=dict(colors=[COLORS['success'], COLORS['warning'], COLORS['info']]),
-                    textinfo='label+percent',
-                    textposition='outside',
-                    textfont=dict(color='#ccd6f6')
-                )])
+                    st.plotly_chart(fig, use_container_width=True)
 
-                apply_dark_theme(fig, height=400, showlegend=False)
-                st.plotly_chart(fig, use_container_width=True)
+                # State coverage stats in a row
+                total_states = len(state_df)
+                total_depleted = state_df['total_depleted'].sum()
+                total_doors = state_df['total_doors'].sum()
+                total_pods = state_df['total_pods'].sum()
+                top_state = state_df.iloc[0]['state'] if len(state_df) > 0 else 'N/A'
+                top_state_pct = (state_df.iloc[0]['total_depleted'] / total_depleted * 100) if total_depleted > 0 else 0
 
-        else:
-            st.info("No product-level data available for selected filters")
-    except Exception as e:
-        st.warning(f"Could not load product-level data: {e}")
+                metric_cols = st.columns(4)
+                with metric_cols[0]:
+                    st.markdown(f"""
+                    <div class="metric-card">
+                        <p class="metric-value">{total_states}</p>
+                        <p class="metric-label">States with Depletion</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with metric_cols[1]:
+                    st.markdown(f"""
+                    <div class="metric-card">
+                        <p class="metric-value">{total_doors:,.0f}</p>
+                        <p class="metric-label">Total Doors (Active)</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with metric_cols[2]:
+                    st.markdown(f"""
+                    <div class="metric-card">
+                        <p class="metric-value">{total_pods:,.0f}</p>
+                        <p class="metric-label">Total PODs</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with metric_cols[3]:
+                    st.markdown(f"""
+                    <div class="metric-card">
+                        <p class="metric-value">{top_state}</p>
+                        <p class="metric-label">Top State ({top_state_pct:.1f}%)</p>
+                    </div>
+                    """, unsafe_allow_html=True)
 
-    # US State Map with metric selector
-    st.markdown('<p class="section-header">Performance by State</p>', unsafe_allow_html=True)
+                # Full-width state table
+                st.markdown("**Top States by Depletion**")
+                state_display = state_df[['state', 'distributor_count', 'total_depleted', 'total_doors', 'total_pods', 'avg_pods_per_dist', 'weekly_rate']].head(15).copy()
+                state_display['total_depleted'] = state_display['total_depleted'].apply(lambda x: f"{x:,.0f}")
+                state_display['weekly_rate'] = state_display['weekly_rate'].apply(lambda x: f"{x:,.0f}")
+                state_display['total_doors'] = state_display['total_doors'].apply(lambda x: f"{x:,.0f}")
+                state_display['total_pods'] = state_display['total_pods'].apply(lambda x: f"{x:,.0f}")
+                state_display['avg_pods_per_dist'] = state_display['avg_pods_per_dist'].apply(lambda x: f"{x:,.1f}")
+                state_display.columns = ['State', 'Distributors', 'Total Depleted', 'Doors', 'PODs', 'SKUs/Door', 'Weekly Rate']
 
-    try:
-        state_df = load_state_depletion_data(lookback_days=lookback_days)
-
-        if not state_df.empty:
-            # Calculate avg PODs per door
-            state_df['avg_pods'] = state_df['total_pods'] / state_df['total_doors'].replace(0, 1)
-
-            # Metric selector and map in columns
-            map_col, selector_col = st.columns([4, 1])
-
-            with selector_col:
-                map_metric = st.radio(
-                    "Metric",
-                    options=['Depletion', 'Doors', 'Total PODs', 'Avg PODs/Door'],
-                    index=0,
-                    key='map_metric_selector'
+                st.dataframe(
+                    state_display,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=400
                 )
-
-            # Map metric to data column and labels
-            metric_config = {
-                'Depletion': {'col': 'total_depleted', 'label': 'Units', 'format': ',.0f'},
-                'Doors': {'col': 'total_doors', 'label': 'Doors', 'format': ',.0f'},
-                'Total PODs': {'col': 'total_pods', 'label': 'PODs', 'format': ',.0f'},
-                'Avg PODs/Door': {'col': 'avg_pods', 'label': 'Avg PODs', 'format': ',.1f'}
-            }
-
-            config = metric_config[map_metric]
-
-            with map_col:
-                # Create choropleth map
-                fig = go.Figure(data=go.Choropleth(
-                    locations=state_df['state'],
-                    z=state_df[config['col']],
-                    locationmode='USA-states',
-                    colorscale=[
-                        [0, '#1a1a2e'],
-                        [0.2, '#0f3460'],
-                        [0.5, '#00a3cc'],
-                        [0.8, '#00d4aa'],
-                        [1, '#64ffda']
-                    ],
-                    colorbar=dict(
-                        title=dict(text=config['label'], font=dict(color='#ccd6f6', size=12)),
-                        tickfont=dict(color='#8892b0', size=10),
-                        thickness=15,
-                        len=0.7
-                    ),
-                    hovertemplate='<b>%{location}</b><br>' +
-                                  f'{config["label"]}: %{{z:{config["format"]}}}<extra></extra>',
-                    marker_line_color='rgba(255,255,255,0.3)',
-                    marker_line_width=0.5
-                ))
-
-                fig.update_layout(
-                    geo=dict(
-                        scope='usa',
-                        bgcolor='rgba(0,0,0,0)',
-                        lakecolor='rgba(0,0,0,0)',
-                        landcolor='#1a1a2e',
-                        showlakes=False,
-                        showland=True
-                    ),
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    margin=dict(l=0, r=0, t=0, b=0),
-                    height=350
-                )
-
-                st.plotly_chart(fig, use_container_width=True)
-
-            # State coverage stats in a row
-            total_states = len(state_df)
-            total_depleted = state_df['total_depleted'].sum()
-            total_doors = state_df['total_doors'].sum()
-            total_pods = state_df['total_pods'].sum()
-            top_state = state_df.iloc[0]['state'] if len(state_df) > 0 else 'N/A'
-            top_state_pct = (state_df.iloc[0]['total_depleted'] / total_depleted * 100) if total_depleted > 0 else 0
-
-            metric_cols = st.columns(4)
-            with metric_cols[0]:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <p class="metric-value">{total_states}</p>
-                    <p class="metric-label">States with Depletion</p>
-                </div>
-                """, unsafe_allow_html=True)
-            with metric_cols[1]:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <p class="metric-value">{total_doors:,.0f}</p>
-                    <p class="metric-label">Total Doors (Active)</p>
-                </div>
-                """, unsafe_allow_html=True)
-            with metric_cols[2]:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <p class="metric-value">{total_pods:,.0f}</p>
-                    <p class="metric-label">Total PODs</p>
-                </div>
-                """, unsafe_allow_html=True)
-            with metric_cols[3]:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <p class="metric-value">{top_state}</p>
-                    <p class="metric-label">Top State ({top_state_pct:.1f}%)</p>
-                </div>
-                """, unsafe_allow_html=True)
-
-            # Full-width state table
-            st.markdown("**Top States by Depletion**")
-            state_display = state_df[['state', 'distributor_count', 'total_depleted', 'total_doors', 'total_pods', 'avg_pods_per_dist', 'weekly_rate']].head(15).copy()
-            state_display['total_depleted'] = state_display['total_depleted'].apply(lambda x: f"{x:,.0f}")
-            state_display['weekly_rate'] = state_display['weekly_rate'].apply(lambda x: f"{x:,.0f}")
-            state_display['total_doors'] = state_display['total_doors'].apply(lambda x: f"{x:,.0f}")
-            state_display['total_pods'] = state_display['total_pods'].apply(lambda x: f"{x:,.0f}")
-            state_display['avg_pods_per_dist'] = state_display['avg_pods_per_dist'].apply(lambda x: f"{x:,.1f}")
-            state_display.columns = ['State', 'Distributors', 'Total Depleted', 'Doors', 'PODs', 'SKUs/Door', 'Weekly Rate']
-
-            st.dataframe(
-                state_display,
-                use_container_width=True,
-                hide_index=True,
-                height=400
-            )
-        else:
-            st.info("No state-level depletion data available")
-    except Exception as e:
-        st.warning(f"Could not load state depletion data: {e}")
+            else:
+                st.info("No state-level depletion data available")
+        except Exception as e:
+            st.warning(f"Could not load state depletion data: {e}")
 
     # Footer
     st.markdown(f"""
