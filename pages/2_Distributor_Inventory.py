@@ -1401,13 +1401,13 @@ def main():
             # Normalize for color scale
             hex_df['color_val'] = hex_df['depleted'] / max_depleted if max_depleted > 0 else 0
 
-            # Add hexagons as markers - scale positions for proper spacing
+            # Add hexagons as markers - use larger spacing factor
             fig.add_trace(go.Scatter(
-                x=hex_df['col'] * 50,  # Scale up for spacing
-                y=-hex_df['row'] * 50,  # Negative to flip y-axis (row 0 at top)
+                x=hex_df['col'],  # Use raw column positions
+                y=-hex_df['row'],  # Negative to flip y-axis (row 0 at top)
                 mode='markers+text',
                 marker=dict(
-                    size=40,
+                    size=35,  # Smaller markers
                     symbol='hexagon',
                     color=hex_df['depleted'],
                     colorscale=[
@@ -1439,9 +1439,19 @@ def main():
                 paper_bgcolor='rgba(0,0,0,0)',
                 plot_bgcolor='rgba(0,0,0,0)',
                 margin=dict(l=10, r=80, t=10, b=10),
-                height=380,
-                xaxis=dict(visible=False),
-                yaxis=dict(visible=False, scaleanchor='x', scaleratio=1),
+                height=400,
+                xaxis=dict(
+                    visible=False,
+                    range=[-1, 13],  # Fixed range for consistent sizing
+                    fixedrange=True
+                ),
+                yaxis=dict(
+                    visible=False,
+                    scaleanchor='x',
+                    scaleratio=1,
+                    range=[-10, 1],  # Fixed range (negative because we flip)
+                    fixedrange=True
+                ),
                 showlegend=False
             )
 
