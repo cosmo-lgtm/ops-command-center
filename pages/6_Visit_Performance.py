@@ -223,7 +223,9 @@ def load_visit_attribution(days_back=30, attribution_window=30, rep_name=None, _
     account_vip_map AS (
         SELECT DISTINCT
             sfdc_account_id,
-            vip_account_code
+            vip_id,
+            vip_account_code,
+            distributor_code
         FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_v2`
         WHERE sfdc_account_id IS NOT NULL
     ),
@@ -237,6 +239,7 @@ def load_visit_attribution(days_back=30, attribution_window=30, rep_name=None, _
         JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
         JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
             ON m.vip_account_code = s.account_code
+            AND m.distributor_code = s.distributor_code
             AND s.transaction_date >= DATE_SUB(v.visit_date, INTERVAL 30 DAY)
             AND s.transaction_date < v.visit_date
         GROUP BY v.task_id, s.product_code
@@ -251,6 +254,7 @@ def load_visit_attribution(days_back=30, attribution_window=30, rep_name=None, _
         JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
         JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
             ON m.vip_account_code = s.account_code
+            AND m.distributor_code = s.distributor_code
             AND s.transaction_date > v.visit_date
             AND s.transaction_date <= DATE_ADD(v.visit_date, INTERVAL {attribution_window} DAY)
         GROUP BY v.task_id, s.product_code
@@ -326,7 +330,9 @@ def load_rep_performance(days_back=30, attribution_window=30, _cache_version=CAC
     account_vip_map AS (
         SELECT DISTINCT
             sfdc_account_id,
-            vip_account_code
+            vip_id,
+            vip_account_code,
+            distributor_code
         FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_v2`
         WHERE sfdc_account_id IS NOT NULL
     ),
@@ -341,6 +347,7 @@ def load_rep_performance(days_back=30, attribution_window=30, _cache_version=CAC
         JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
         JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
             ON m.vip_account_code = s.account_code
+            AND m.distributor_code = s.distributor_code
             AND s.transaction_date >= DATE_SUB(v.visit_date, INTERVAL 30 DAY)
             AND s.transaction_date < v.visit_date
         GROUP BY v.task_id, v.rep_id, s.product_code
@@ -356,6 +363,7 @@ def load_rep_performance(days_back=30, attribution_window=30, _cache_version=CAC
         JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
         JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
             ON m.vip_account_code = s.account_code
+            AND m.distributor_code = s.distributor_code
             AND s.transaction_date > v.visit_date
             AND s.transaction_date <= DATE_ADD(v.visit_date, INTERVAL {attribution_window} DAY)
         GROUP BY v.task_id, v.rep_id, s.product_code
@@ -442,7 +450,9 @@ def load_pod_growth(days_back=60, attribution_window=30, _cache_version=CACHE_VE
     account_vip_map AS (
         SELECT DISTINCT
             sfdc_account_id,
-            vip_account_code
+            vip_id,
+            vip_account_code,
+            distributor_code
         FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_v2`
         WHERE sfdc_account_id IS NOT NULL
     ),
@@ -455,6 +465,7 @@ def load_pod_growth(days_back=60, attribution_window=30, _cache_version=CACHE_VE
         JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
         JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
             ON m.vip_account_code = s.account_code
+            AND m.distributor_code = s.distributor_code
             AND s.transaction_date >= DATE_SUB(v.visit_date, INTERVAL 30 DAY)
             AND s.transaction_date < v.visit_date
     ),
@@ -467,6 +478,7 @@ def load_pod_growth(days_back=60, attribution_window=30, _cache_version=CACHE_VE
         JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
         JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
             ON m.vip_account_code = s.account_code
+            AND m.distributor_code = s.distributor_code
             AND s.transaction_date > v.visit_date
             AND s.transaction_date <= DATE_ADD(v.visit_date, INTERVAL {attribution_window} DAY)
     ),
@@ -529,7 +541,9 @@ def load_weekly_trend(weeks_back=12, _cache_version=CACHE_VERSION):
     account_vip_map AS (
         SELECT DISTINCT
             sfdc_account_id,
-            vip_account_code
+            vip_id,
+            vip_account_code,
+            distributor_code
         FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_v2`
         WHERE sfdc_account_id IS NOT NULL
     ),
@@ -543,6 +557,7 @@ def load_weekly_trend(weeks_back=12, _cache_version=CACHE_VERSION):
         JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
         JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
             ON m.vip_account_code = s.account_code
+            AND m.distributor_code = s.distributor_code
             AND s.transaction_date >= DATE_SUB(v.visit_date, INTERVAL 30 DAY)
             AND s.transaction_date < v.visit_date
         GROUP BY v.task_id, s.product_code
@@ -557,6 +572,7 @@ def load_weekly_trend(weeks_back=12, _cache_version=CACHE_VERSION):
         JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
         JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
             ON m.vip_account_code = s.account_code
+            AND m.distributor_code = s.distributor_code
             AND s.transaction_date > v.visit_date
             AND s.transaction_date <= DATE_ADD(v.visit_date, INTERVAL 30 DAY)
         GROUP BY v.task_id, s.product_code
@@ -813,13 +829,13 @@ def main():
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Row 2: Leaderboard & Trend
-    col1, col2 = st.columns([1, 2])
-
-    with col1:
-        st.markdown('<p class="section-header">Rep Leaderboard (by Attribution)</p>', unsafe_allow_html=True)
-        if not rep_performance.empty:
-            for rank, (idx, row) in enumerate(rep_performance.head(10).iterrows(), start=1):
+    # Row 2: Rep Leaderboard (full width, 2 columns of 5)
+    st.markdown('<p class="section-header">Rep Leaderboard</p>', unsafe_allow_html=True)
+    if not rep_performance.empty:
+        col1, col2 = st.columns(2)
+        top_10 = rep_performance.head(10)
+        for rank, (idx, row) in enumerate(top_10.iterrows(), start=1):
+            with col1 if rank <= 5 else col2:
                 st.markdown(render_leaderboard_entry(
                     rank=rank,
                     name=row['rep_name'],
@@ -827,10 +843,11 @@ def main():
                     conversion_rate=row['conversion_rate'] if pd.notna(row['conversion_rate']) else 0,
                     units=row['total_attributed_units'] if pd.notna(row['total_attributed_units']) else 0
                 ), unsafe_allow_html=True)
-        else:
-            st.info("No rep data available")
+    else:
+        st.info("No rep data available")
 
-    with col2:
+    # Weekly trend section removed - data not reliable enough yet
+    if False:  # Disabled for now
         st.markdown('<p class="section-header">Weekly Attribution Trend</p>', unsafe_allow_html=True)
         if not weekly_trend.empty:
             fig = go.Figure()
