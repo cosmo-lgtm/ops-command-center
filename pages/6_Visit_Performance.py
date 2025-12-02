@@ -566,7 +566,8 @@ def load_weekly_trend(weeks_back=12):
         COALESCE(SUM(vt.total_attributed_units), 0) as total_attributed_units
     FROM visits v
     LEFT JOIN visit_totals vt ON v.task_id = vt.task_id
-    WHERE v.visit_week <= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
+    WHERE v.visit_week >= '{ATTRIBUTION_START_DATE}'
+      AND v.visit_week <= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
     GROUP BY v.visit_week
     ORDER BY v.visit_week
     """
@@ -716,7 +717,7 @@ def main():
 
     with col2:
         st.markdown(render_metric_card(
-            f"{attribution['total_visits_in_window']:,}",
+            f"{int(attribution['total_visits_in_window']):,}",
             f"Visits (w/ {attribution_window}d window)",
             f"Eligible for attribution",
             "neutral"
