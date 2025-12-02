@@ -829,13 +829,18 @@ def main():
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Row 2: Rep Leaderboard (full width, 2 columns of 5)
+    # Row 2: Rep Leaderboard (Top 5 left, Bottom 5 right)
     st.markdown('<p class="section-header">Rep Leaderboard</p>', unsafe_allow_html=True)
     if not rep_performance.empty:
         col1, col2 = st.columns(2)
-        top_10 = rep_performance.head(10)
-        for rank, (idx, row) in enumerate(top_10.iterrows(), start=1):
-            with col1 if rank <= 5 else col2:
+        total_reps = len(rep_performance)
+        top_5 = rep_performance.head(5)
+        bottom_5 = rep_performance.tail(5) if total_reps > 5 else pd.DataFrame()
+
+        # Top 5 on the left
+        with col1:
+            st.markdown('<p style="font-size: 0.9rem; color: #6b7280; margin-bottom: 0.5rem;">Top 5</p>', unsafe_allow_html=True)
+            for rank, (idx, row) in enumerate(top_5.iterrows(), start=1):
                 st.markdown(render_leaderboard_entry(
                     rank=rank,
                     name=row['rep_name'],
@@ -843,6 +848,19 @@ def main():
                     conversion_rate=row['conversion_rate'] if pd.notna(row['conversion_rate']) else 0,
                     units=row['total_attributed_units'] if pd.notna(row['total_attributed_units']) else 0
                 ), unsafe_allow_html=True)
+
+        # Bottom 5 on the right
+        with col2:
+            if not bottom_5.empty:
+                st.markdown('<p style="font-size: 0.9rem; color: #6b7280; margin-bottom: 0.5rem;">Bottom 5</p>', unsafe_allow_html=True)
+                for rank, (idx, row) in enumerate(bottom_5.iterrows(), start=total_reps - 4):
+                    st.markdown(render_leaderboard_entry(
+                        rank=rank,
+                        name=row['rep_name'],
+                        visits=row['total_visits'],
+                        conversion_rate=row['conversion_rate'] if pd.notna(row['conversion_rate']) else 0,
+                        units=row['total_attributed_units'] if pd.notna(row['total_attributed_units']) else 0
+                    ), unsafe_allow_html=True)
     else:
         st.info("No rep data available")
 
