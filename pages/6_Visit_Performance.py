@@ -641,7 +641,7 @@ def main():
         attribution_window = st.selectbox(
             "Attribution Window",
             options=[7, 14, 30],
-            index=2,
+            index=1,  # Default to 14 days
             format_func=lambda x: f"{x} days post-visit"
         )
 
@@ -666,12 +666,14 @@ def main():
 
         **Bonus Period**: Nov 17, 2024 onwards
 
-        A visit "converts" if the account shows **growth** within the attribution window:
+        A visit "converts" if the account shows **growth** within {attribution_window} days post-visit:
 
         - **New POD Units**: Volume from SKUs not bought in prior 30 days
         - **Incremental Units**: Volume increase on existing SKUs
 
         Only the **delta** (growth) is attributed, not total volume.
+
+        *Note: Only visits {attribution_window}+ days old are measured (need full window to elapse).*
         """)
 
     # Header
