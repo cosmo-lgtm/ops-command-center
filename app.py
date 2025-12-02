@@ -28,13 +28,25 @@ st.markdown("""
         background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%);
     }
 
-    /* Sidebar styling */
+    /* Sidebar styling - force always visible */
     [data-testid="stSidebar"] {
         background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+        min-width: 250px !important;
+        width: 250px !important;
+        transform: translateX(0) !important;
     }
 
     [data-testid="stSidebar"] .stMarkdown {
         color: #ccd6f6;
+    }
+
+    /* Hide the collapse button */
+    [data-testid="stSidebar"] button[kind="header"] {
+        display: none !important;
+    }
+
+    [data-testid="collapsedControl"] {
+        display: none !important;
     }
 
     /* Hide Streamlit branding */
