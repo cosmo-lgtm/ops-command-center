@@ -163,7 +163,7 @@ def load_visit_summary(days_back=30):
 
 
 # Hardcoded attribution start date for bonus period
-ATTRIBUTION_START_DATE = '2024-11-17'
+ATTRIBUTION_START_DATE = '2025-11-17'
 
 
 @st.cache_data(ttl=300)
@@ -664,7 +664,7 @@ def main():
         st.markdown(f"""
         **Attribution Logic**
 
-        **Bonus Period**: Nov 17, 2024 onwards
+        **Bonus Period**: Nov 17, 2025 onwards
 
         A visit "converts" if the account shows **growth** within {attribution_window} days post-visit:
 
