@@ -698,9 +698,29 @@ def render_leaderboard_entry(rank, name, visits, conversion_rate, units, measura
             badges_html += '<span class="attribution-badge">HIGH CONVERTER</span>'
         if units >= 500:
             badges_html += '<span class="pod-badge">TOP SELLER</span>'
-    stats_text = f"{int(visits)} visits"
-    attr_text = f'<span style="color: #6b7280; font-size: 0.7rem;"> ({int(measurable_visits)} measurable → {conversion_rate:.0f}% converted, {units:,.0f} units)</span>'
-    return f'<div class="leaderboard-card"><span class="leaderboard-rank {rank_class}">#{rank}</span> <span class="leaderboard-name">{safe_name}</span>{badges_html}<div class="leaderboard-stats">{stats_text}{attr_text}</div></div>'
+
+    # BAN-style metrics row
+    metrics_html = f'''
+    <div style="display: flex; gap: 16px; margin-top: 8px;">
+        <div style="text-align: center;">
+            <div style="font-size: 1.25rem; font-weight: 700; color: #f59e0b;">{int(visits)}</div>
+            <div style="font-size: 0.65rem; color: #6b7280; text-transform: uppercase;">Visits</div>
+        </div>
+        <div style="text-align: center;">
+            <div style="font-size: 1.25rem; font-weight: 700; color: #9ca3af;">{int(measurable_visits)}</div>
+            <div style="font-size: 0.65rem; color: #6b7280; text-transform: uppercase;">Measurable</div>
+        </div>
+        <div style="text-align: center;">
+            <div style="font-size: 1.25rem; font-weight: 700; color: #10b981;">{conversion_rate:.0f}%</div>
+            <div style="font-size: 0.65rem; color: #6b7280; text-transform: uppercase;">Converted</div>
+        </div>
+        <div style="text-align: center;">
+            <div style="font-size: 1.25rem; font-weight: 700; color: #3b82f6;">{int(units):,}</div>
+            <div style="font-size: 0.65rem; color: #6b7280; text-transform: uppercase;">Units</div>
+        </div>
+    </div>
+    '''
+    return f'<div class="leaderboard-card"><span class="leaderboard-rank {rank_class}">#{rank}</span> <span class="leaderboard-name">{safe_name}</span>{badges_html}{metrics_html}</div>'
 
 
 # =============================================================================
