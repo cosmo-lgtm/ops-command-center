@@ -165,7 +165,31 @@ def load_visit_summary(days_back=30):
 # Hardcoded attribution start date for bonus period
 ATTRIBUTION_START_DATE = '2025-11-17'
 # Cache version - increment to force cache refresh
-CACHE_VERSION = 2
+CACHE_VERSION = 3
+
+
+@st.cache_data(ttl=300)
+def load_bonus_period_visits(_cache_version=CACHE_VERSION):
+    """Load ALL visits since bonus period start (effort metric - real-time)."""
+    client = get_bq_client()
+    query = f"""
+    SELECT
+        COUNT(*) as total_visits,
+        COUNT(DISTINCT AccountId) as unique_accounts,
+        COUNT(DISTINCT OwnerId) as active_reps,
+        COUNT(DISTINCT DATE(CompletedDateTime)) as active_days,
+        -- Visits that can be measured (14+ days old)
+        COUNTIF(DATE(CompletedDateTime) <= DATE_SUB(CURRENT_DATE(), INTERVAL 14 DAY)) as measurable_visits,
+        -- Visits still pending attribution window
+        COUNTIF(DATE(CompletedDateTime) > DATE_SUB(CURRENT_DATE(), INTERVAL 14 DAY)) as pending_visits
+    FROM `artful-logic-475116-p1.raw_salesforce.Task`
+    WHERE Subject LIKE 'Check In%'
+      AND Status = 'Completed'
+      AND CompletedDateTime IS NOT NULL
+      AND AccountId IS NOT NULL
+      AND DATE(CompletedDateTime) >= '{ATTRIBUTION_START_DATE}'
+    """
+    return client.query(query).to_dataframe().iloc[0]
 
 
 @st.cache_data(ttl=300)
@@ -694,12 +718,10 @@ def main():
 
     # Load data
     try:
-        visit_summary = load_visit_summary(days_back)
+        bonus_visits = load_bonus_period_visits()
         attribution = load_visit_attribution(days_back, attribution_window, selected_rep)
         rep_performance = load_rep_performance(days_back, attribution_window)
-        pod_growth = load_pod_growth(days_back, attribution_window)
         weekly_trend = load_weekly_trend(12)
-        visits_this_week = load_this_week_visits()
 
         # Filter rep_performance if a specific rep is selected
         if selected_rep and selected_rep != "All Reps":
@@ -708,57 +730,82 @@ def main():
         st.error(f"Error loading data: {e}")
         return
 
-    # Row 1: Key Metrics
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    # Section 1: EFFORT METRICS (Real-time)
+    st.markdown('<p class="section-header">Effort Metrics (Real-Time)</p>', unsafe_allow_html=True)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         st.markdown(render_metric_card(
-            f"{visits_this_week:,}",
-            "Visits This Week",
-            "Current activity",
+            f"{int(bonus_visits['total_visits']):,}",
+            "Total Visits",
+            f"Since Nov 17, 2025",
             "neutral"
         ), unsafe_allow_html=True)
 
     with col2:
         st.markdown(render_metric_card(
-            f"{int(attribution['total_visits_in_window']):,}",
-            f"Visits (w/ {attribution_window}d window)",
-            f"Eligible for attribution",
+            f"{int(bonus_visits['unique_accounts']):,}",
+            "Unique Accounts",
+            f"{int(bonus_visits['active_reps'])} active reps",
             "neutral"
         ), unsafe_allow_html=True)
 
     with col3:
+        st.markdown(render_metric_card(
+            f"{int(bonus_visits['measurable_visits']):,}",
+            "Measurable Visits",
+            f"14+ days old",
+            "gold"
+        ), unsafe_allow_html=True)
+
+    with col4:
+        st.markdown(render_metric_card(
+            f"{int(bonus_visits['pending_visits']):,}",
+            "Pending Attribution",
+            f"< 14 days old",
+            "neutral"
+        ), unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Section 2: ATTRIBUTION METRICS (Lagged - only measurable visits)
+    st.markdown('<p class="section-header">Attribution Metrics (14-Day Lag)</p>', unsafe_allow_html=True)
+    st.caption("⚠️ These metrics only include visits from Nov 17-18 (the only visits 14+ days old so far). More data will appear as time passes.")
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
         conv_rate = attribution['conversion_rate'] if pd.notna(attribution['conversion_rate']) else 0
         conv_status = "healthy" if conv_rate >= 20 else "gold" if conv_rate >= 10 else "critical"
         st.markdown(render_metric_card(
             f"{conv_rate:.1f}%",
             "Conversion Rate",
-            f"{attribution['visits_converted']:,.0f} visits with growth",
+            f"{int(attribution['visits_converted']):,} visits with growth",
             conv_status
         ), unsafe_allow_html=True)
 
-    with col4:
+    with col2:
         new_pod_units = attribution['new_pod_units'] if pd.notna(attribution['new_pod_units']) else 0
         st.markdown(render_metric_card(
-            f"{new_pod_units:,.0f}",
+            f"{int(new_pod_units):,}",
             "New POD Units",
-            f"{attribution['total_new_pods']:,.0f} new SKUs added",
+            f"{int(attribution['total_new_pods']):,} new SKUs added",
             "healthy"
         ), unsafe_allow_html=True)
 
-    with col5:
+    with col3:
         incremental_units = attribution['incremental_units'] if pd.notna(attribution['incremental_units']) else 0
         st.markdown(render_metric_card(
-            f"{incremental_units:,.0f}",
+            f"{int(incremental_units):,}",
             "Incremental Units",
             "Growth on existing SKUs",
             "gold"
         ), unsafe_allow_html=True)
 
-    with col6:
+    with col4:
         total_attributed = attribution['total_attributed_units'] if pd.notna(attribution['total_attributed_units']) else 0
         st.markdown(render_metric_card(
-            f"{total_attributed:,.0f}",
+            f"{int(total_attributed):,}",
             "Total Attributed",
             "New POD + Incremental",
             "neutral"
