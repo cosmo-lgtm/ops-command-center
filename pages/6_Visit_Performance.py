@@ -424,7 +424,7 @@ def load_rep_performance(days_back=30, attribution_window=30, _cache_version=CAC
     FROM rep_stats s
     JOIN rep_names r ON s.rep_id = r.Id
     WHERE s.total_visits >= 5
-    ORDER BY s.total_attributed_units DESC
+    ORDER BY s.total_visits DESC
     """
     return client.query(query).to_dataframe()
 
