@@ -17,18 +17,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Nowadays branded dark theme with responsive design
+# Dark mode custom CSS with responsive design
 st.markdown("""
 <style>
-    /* ===========================================
-       NOWADAYS BRAND COLORS (Dark Mode)
-       - Night: #2d2926 (deep brown-black)
-       - Tan: #f1efe8 (warm cream - for text)
-       - Bone: #d7d2cb (light taupe)
-       - Gold: #ffcf2a (accent)
-       - Warm Gray: #98938f
-       =========================================== */
-
     /* Force wide layout */
     .block-container {
         max-width: 100% !important;
@@ -37,7 +28,7 @@ st.markdown("""
     }
 
     .stApp {
-        background: linear-gradient(135deg, #1a1715 0%, #2d2926 50%, #252220 100%);
+        background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%);
     }
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
@@ -45,10 +36,10 @@ st.markdown("""
 
     /* Base styles (mobile-first) */
     .metric-card {
-        background: linear-gradient(145deg, #2d2926 0%, #3a3633 100%);
+        background: linear-gradient(145deg, #1e1e2f 0%, #2a2a4a 100%);
         border-radius: 12px;
         padding: 16px;
-        border: 1px solid rgba(241, 239, 232, 0.1);
+        border: 1px solid rgba(255,255,255,0.1);
         box-shadow: 0 8px 32px rgba(0,0,0,0.3);
         margin-bottom: 12px;
     }
@@ -56,30 +47,30 @@ st.markdown("""
         transform: translateY(-2px);
         box-shadow: 0 12px 40px rgba(0,0,0,0.4);
     }
-    .metric-value { font-size: clamp(1.5rem, 4vw, 2.25rem); font-weight: 700; background: linear-gradient(135deg, #f1efe8 0%, #d7d2cb 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; }
-    .metric-value-green { font-size: clamp(1.5rem, 4vw, 2.25rem); font-weight: 700; background: linear-gradient(135deg, #7cb87c 0%, #5a9a5a 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; }
-    .metric-value-gold { font-size: clamp(1.5rem, 4vw, 2.25rem); font-weight: 700; background: linear-gradient(135deg, #ffcf2a 0%, #e6b800 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; }
-    .metric-value-red { font-size: clamp(1.5rem, 4vw, 2.25rem); font-weight: 700; background: linear-gradient(135deg, #d98282 0%, #c45c5c 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; }
-    .metric-label { font-size: clamp(0.7rem, 1.5vw, 0.875rem); color: #98938f; text-transform: uppercase; letter-spacing: 1px; margin-top: 6px; }
-    .metric-sublabel { font-size: clamp(0.65rem, 1.2vw, 0.75rem); color: #6b6662; margin-top: 4px; }
+    .metric-value { font-size: clamp(1.5rem, 4vw, 2.25rem); font-weight: 700; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; }
+    .metric-value-green { font-size: clamp(1.5rem, 4vw, 2.25rem); font-weight: 700; background: linear-gradient(135deg, #64ffda 0%, #00bfa5 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; }
+    .metric-value-gold { font-size: clamp(1.5rem, 4vw, 2.25rem); font-weight: 700; background: linear-gradient(135deg, #ffd666 0%, #f39c12 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; }
+    .metric-value-red { font-size: clamp(1.5rem, 4vw, 2.25rem); font-weight: 700; background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; }
+    .metric-label { font-size: clamp(0.7rem, 1.5vw, 0.875rem); color: #8892b0; text-transform: uppercase; letter-spacing: 1px; margin-top: 6px; }
+    .metric-sublabel { font-size: clamp(0.65rem, 1.2vw, 0.75rem); color: #5a6785; margin-top: 4px; }
 
-    .dashboard-header { background: linear-gradient(90deg, #f1efe8 0%, #d7d2cb 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: clamp(1.75rem, 5vw, 2.625rem); font-weight: 800; margin-bottom: 8px; }
-    .dashboard-subtitle { color: #98938f; font-size: clamp(0.875rem, 2vw, 1rem); margin-bottom: 24px; }
-    .section-header { color: #f1efe8; font-size: clamp(1.1rem, 2.5vw, 1.375rem); font-weight: 600; margin: 24px 0 12px 0; padding-bottom: 8px; border-bottom: 2px solid rgba(255, 207, 42, 0.3); }
+    .dashboard-header { background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: clamp(1.75rem, 5vw, 2.625rem); font-weight: 800; margin-bottom: 8px; }
+    .dashboard-subtitle { color: #8892b0; font-size: clamp(0.875rem, 2vw, 1rem); margin-bottom: 24px; }
+    .section-header { color: #ccd6f6; font-size: clamp(1.1rem, 2.5vw, 1.375rem); font-weight: 600; margin: 24px 0 12px 0; padding-bottom: 8px; border-bottom: 2px solid rgba(102, 126, 234, 0.3); }
 
     .leaderboard-card {
-        background: linear-gradient(145deg, #2d2926 0%, #3a3633 100%);
+        background: linear-gradient(145deg, #1e1e2f 0%, #2a2a4a 100%);
         border-radius: 12px;
         padding: clamp(12px, 2vw, 16px);
-        border: 1px solid rgba(241, 239, 232, 0.08);
+        border: 1px solid rgba(255,255,255,0.08);
         margin-bottom: 8px;
     }
-    .leaderboard-rank { font-size: clamp(1.25rem, 3vw, 1.5rem); font-weight: 700; color: #d7d2cb; width: 40px; display: inline-block; }
-    .leaderboard-rank-gold { color: #ffcf2a; }
-    .leaderboard-rank-silver { color: #d7d2cb; }
-    .leaderboard-rank-bronze { color: #a67c52; }
-    .leaderboard-name { color: #f1efe8; font-weight: 600; font-size: clamp(0.9rem, 2vw, 1rem); }
-    .leaderboard-stats { color: #98938f; font-size: clamp(0.7rem, 1.5vw, 0.75rem); margin-top: 4px; }
+    .leaderboard-rank { font-size: clamp(1.25rem, 3vw, 1.5rem); font-weight: 700; color: #ccd6f6; width: 40px; display: inline-block; }
+    .leaderboard-rank-gold { color: #ffd666; }
+    .leaderboard-rank-silver { color: #c0c0c0; }
+    .leaderboard-rank-bronze { color: #cd7f32; }
+    .leaderboard-name { color: #ccd6f6; font-weight: 600; font-size: clamp(0.9rem, 2vw, 1rem); }
+    .leaderboard-stats { color: #8892b0; font-size: clamp(0.7rem, 1.5vw, 0.75rem); margin-top: 4px; }
 
     /* BAN metrics in leaderboard cards */
     .leaderboard-card .ban-metrics {
@@ -98,15 +89,15 @@ st.markdown("""
     }
     .leaderboard-card .ban-label {
         font-size: clamp(0.55rem, 1vw, 0.65rem);
-        color: #98938f;
+        color: #8892b0;
         text-transform: uppercase;
     }
 
-    .attribution-badge { background: linear-gradient(135deg, #7cb87c 0%, #5a9a5a 100%); color: #1a1715; padding: 3px 10px; border-radius: 20px; font-size: clamp(0.6rem, 1.2vw, 0.7rem); font-weight: 700; margin-left: 8px; }
-    .pod-badge { background: linear-gradient(135deg, #ffcf2a 0%, #e6b800 100%); color: #1a1715; padding: 3px 10px; border-radius: 20px; font-size: clamp(0.6rem, 1.2vw, 0.7rem); font-weight: 700; margin-left: 8px; }
+    .attribution-badge { background: linear-gradient(135deg, #64ffda 0%, #00bfa5 100%); color: #0f0f1a; padding: 3px 10px; border-radius: 20px; font-size: clamp(0.6rem, 1.2vw, 0.7rem); font-weight: 700; margin-left: 8px; }
+    .pod-badge { background: linear-gradient(135deg, #ffd666 0%, #f39c12 100%); color: #0f0f1a; padding: 3px 10px; border-radius: 20px; font-size: clamp(0.6rem, 1.2vw, 0.7rem); font-weight: 700; margin-left: 8px; }
 
-    .live-indicator { display: inline-flex; align-items: center; gap: 8px; color: #ffcf2a; font-size: clamp(0.65rem, 1.5vw, 0.75rem); text-transform: uppercase; letter-spacing: 1px; }
-    .live-dot { width: 8px; height: 8px; background: #ffcf2a; border-radius: 50%; animation: pulse 2s infinite; }
+    .live-indicator { display: inline-flex; align-items: center; gap: 8px; color: #64ffda; font-size: clamp(0.65rem, 1.5vw, 0.75rem); text-transform: uppercase; letter-spacing: 1px; }
+    .live-dot { width: 8px; height: 8px; background: #64ffda; border-radius: 50%; animation: pulse 2s infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.2); } }
 
     /* Tablet breakpoint */
@@ -134,37 +125,27 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Nowadays brand colors
-COLORS = {
-    'primary': '#f1efe8',    # Tan (cream text)
-    'secondary': '#d7d2cb',  # Bone (light taupe)
-    'success': '#7cb87c',    # Muted green
-    'warning': '#ffcf2a',    # Nowadays gold
-    'danger': '#d98282',     # Muted red
-    'gold': '#ffcf2a',       # Nowadays gold
-    'night': '#2d2926',      # Deep brown-black
-    'warmgray': '#98938f',   # Warm gray
-}
+COLORS = {'primary': '#667eea', 'secondary': '#764ba2', 'success': '#64ffda', 'warning': '#ffd666', 'danger': '#ff6b6b', 'info': '#74b9ff'}
 
 
 def apply_dark_theme(fig, height=350, **kwargs):
-    """Apply Nowadays branded dark theme to a plotly figure."""
+    """Apply dark theme to a plotly figure."""
     layout_args = {
         'paper_bgcolor': 'rgba(0,0,0,0)',
         'plot_bgcolor': 'rgba(0,0,0,0)',
-        'font': {'color': '#f1efe8', 'family': 'system-ui, -apple-system, sans-serif'},
+        'font': {'color': '#ccd6f6', 'family': 'Inter, sans-serif'},
         'height': height,
         'margin': kwargs.get('margin', dict(l=0, r=0, t=20, b=0)),
         'xaxis': {
-            'gridcolor': 'rgba(241, 239, 232, 0.1)',
-            'linecolor': 'rgba(241, 239, 232, 0.1)',
-            'tickfont': {'color': '#98938f'},
+            'gridcolor': 'rgba(255,255,255,0.1)',
+            'linecolor': 'rgba(255,255,255,0.1)',
+            'tickfont': {'color': '#8892b0'},
             **kwargs.get('xaxis', {})
         },
         'yaxis': {
-            'gridcolor': 'rgba(241, 239, 232, 0.1)',
-            'linecolor': 'rgba(241, 239, 232, 0.1)',
-            'tickfont': {'color': '#98938f'},
+            'gridcolor': 'rgba(255,255,255,0.1)',
+            'linecolor': 'rgba(255,255,255,0.1)',
+            'tickfont': {'color': '#8892b0'},
             **kwargs.get('yaxis', {})
         }
     }
@@ -760,19 +741,19 @@ def render_leaderboard_entry(rank, name, visits, conversion_rate, units, measura
     metrics_html = f'''
     <div class="ban-metrics">
         <div class="ban-metric">
-            <div class="ban-value" style="color: #ffcf2a;">{int(visits)}</div>
+            <div class="ban-value" style="color: #ffd666;">{int(visits)}</div>
             <div class="ban-label">Visits</div>
         </div>
         <div class="ban-metric">
-            <div class="ban-value" style="color: #98938f;">{int(measurable_visits)}</div>
+            <div class="ban-value" style="color: #8892b0;">{int(measurable_visits)}</div>
             <div class="ban-label">Measurable</div>
         </div>
         <div class="ban-metric">
-            <div class="ban-value" style="color: #7cb87c;">{conversion_rate:.0f}%</div>
+            <div class="ban-value" style="color: #64ffda;">{conversion_rate:.0f}%</div>
             <div class="ban-label">Converted</div>
         </div>
         <div class="ban-metric">
-            <div class="ban-value" style="color: #d7d2cb;">{int(units):,}</div>
+            <div class="ban-value" style="color: #ccd6f6;">{int(units):,}</div>
             <div class="ban-label">Units</div>
         </div>
     </div>
