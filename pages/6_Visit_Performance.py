@@ -164,10 +164,12 @@ def load_visit_summary(days_back=30):
 
 # Hardcoded attribution start date for bonus period
 ATTRIBUTION_START_DATE = '2025-11-17'
+# Cache version - increment to force cache refresh
+CACHE_VERSION = 2
 
 
 @st.cache_data(ttl=300)
-def load_visit_attribution(days_back=30, attribution_window=30, rep_name=None):
+def load_visit_attribution(days_back=30, attribution_window=30, rep_name=None, _cache_version=CACHE_VERSION):
     """Load visit attribution metrics - before/after comparison model.
 
     Conversion = visit led to GROWTH (new PODs or increased volume)
@@ -275,7 +277,7 @@ def load_visit_attribution(days_back=30, attribution_window=30, rep_name=None):
 
 
 @st.cache_data(ttl=300)
-def load_rep_performance(days_back=30, attribution_window=30):
+def load_rep_performance(days_back=30, attribution_window=30, _cache_version=CACHE_VERSION):
     """Load rep-level performance with before/after attribution model."""
     client = get_bq_client()
     query = f"""
@@ -396,7 +398,7 @@ def load_rep_performance(days_back=30, attribution_window=30):
 
 
 @st.cache_data(ttl=300)
-def load_pod_growth(days_back=60, attribution_window=30):
+def load_pod_growth(days_back=60, attribution_window=30, _cache_version=CACHE_VERSION):
     """Load POD growth metrics - counts NEW SKUs added after visits."""
     client = get_bq_client()
     query = f"""
@@ -483,7 +485,7 @@ def load_pod_growth(days_back=60, attribution_window=30):
 
 
 @st.cache_data(ttl=300)
-def load_weekly_trend(weeks_back=12):
+def load_weekly_trend(weeks_back=12, _cache_version=CACHE_VERSION):
     """Load weekly visit attribution trend - before/after comparison model."""
     client = get_bq_client()
     query = f"""
