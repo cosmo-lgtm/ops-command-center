@@ -288,7 +288,7 @@ def load_visit_attribution(days_back=30, attribution_window=30, rep_name=None, _
         GROUP BY task_id
     )
     SELECT
-        COUNT(DISTINCT v.task_id) as total_visits_in_window,
+        COUNT(DISTINCT v.task_id) as measurable_visits,
         COUNT(DISTINCT CASE WHEN vt.total_attributed_units > 0 THEN v.task_id END) as visits_converted,
         SAFE_DIVIDE(
             COUNT(DISTINCT CASE WHEN vt.total_attributed_units > 0 THEN v.task_id END),
@@ -865,6 +865,19 @@ def main():
 
     # Row 2: Rep Leaderboard (Top 5 left, Bottom 5 right)
     st.markdown('<p class="section-header">Rep Leaderboard</p>', unsafe_allow_html=True)
+
+    # Measurable visits KPI
+    measurable_visits = attribution['measurable_visits'] if 'measurable_visits' in attribution and pd.notna(attribution['measurable_visits']) else 0
+    st.markdown(f"""
+    <div style="background: rgba(30, 41, 59, 0.5); border: 1px solid rgba(71, 85, 105, 0.5); border-radius: 8px; padding: 12px 16px; margin-bottom: 16px;">
+        <span style="font-size: 1.5rem; font-weight: 700; color: #f59e0b;">{int(measurable_visits):,}</span>
+        <span style="font-size: 0.9rem; color: #9ca3af; margin-left: 8px;">Measurable Visits</span>
+        <span style="font-size: 0.75rem; color: #6b7280; margin-left: 8px;">(14+ days old)</span>
+    </div>
+    <p style="font-size: 0.75rem; color: #6b7280; margin-top: -8px; margin-bottom: 12px;">
+        ⚠️ Conversion % and units attributed are based only on visits 14+ days old (to allow time for sales attribution)
+    </p>
+    """, unsafe_allow_html=True)
     if not rep_performance.empty:
         col1, col2 = st.columns(2)
         total_reps = len(rep_performance)
