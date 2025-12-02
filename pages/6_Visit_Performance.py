@@ -309,7 +309,8 @@ def load_rep_performance(days_back=30, attribution_window=30, _cache_version=CAC
     """Load rep-level performance with before/after attribution model."""
     client = get_bq_client()
     query = f"""
-    WITH visits AS (
+    WITH all_visits AS (
+        -- All visits since Nov 17 for effort count
         SELECT
             t.Id as task_id,
             t.AccountId as account_id,
@@ -321,7 +322,11 @@ def load_rep_performance(days_back=30, attribution_window=30, _cache_version=CAC
           AND t.CompletedDateTime IS NOT NULL
           AND t.AccountId IS NOT NULL
           AND DATE(t.CompletedDateTime) >= '{ATTRIBUTION_START_DATE}'
-          AND DATE(t.CompletedDateTime) <= DATE_SUB(CURRENT_DATE(), INTERVAL {attribution_window} DAY)
+    ),
+    visits AS (
+        -- Only visits old enough for attribution calculation
+        SELECT * FROM all_visits
+        WHERE visit_date <= DATE_SUB(CURRENT_DATE(), INTERVAL {attribution_window} DAY)
     ),
     rep_names AS (
         SELECT Id, Name
@@ -396,12 +401,19 @@ def load_rep_performance(days_back=30, attribution_window=30, _cache_version=CAC
         FROM visit_attribution
         GROUP BY task_id, rep_id
     ),
-    -- Aggregate to rep level
-    rep_stats AS (
+    -- All visits count per rep (for effort)
+    all_visit_counts AS (
+        SELECT
+            rep_id,
+            COUNT(DISTINCT task_id) as total_visits,
+            COUNT(DISTINCT account_id) as unique_accounts
+        FROM all_visits
+        GROUP BY rep_id
+    ),
+    -- Attribution stats (only from visits old enough)
+    attribution_stats AS (
         SELECT
             v.rep_id,
-            COUNT(DISTINCT v.task_id) as total_visits,
-            COUNT(DISTINCT v.account_id) as unique_accounts,
             COUNT(DISTINCT CASE WHEN vt.total_attributed_units > 0 THEN v.task_id END) as visits_converted,
             COALESCE(SUM(vt.new_pod_units), 0) as new_pod_units,
             COALESCE(SUM(vt.incremental_units), 0) as incremental_units,
@@ -413,18 +425,19 @@ def load_rep_performance(days_back=30, attribution_window=30, _cache_version=CAC
     )
     SELECT
         r.Name as rep_name,
-        s.total_visits,
-        s.unique_accounts,
-        s.visits_converted,
-        SAFE_DIVIDE(s.visits_converted, s.total_visits) * 100 as conversion_rate,
-        s.new_pod_units,
-        s.incremental_units,
-        s.total_attributed_units,
-        s.new_pods_count
-    FROM rep_stats s
-    JOIN rep_names r ON s.rep_id = r.Id
-    WHERE s.total_visits >= 5
-    ORDER BY s.total_visits DESC
+        avc.total_visits,
+        avc.unique_accounts,
+        COALESCE(att.visits_converted, 0) as visits_converted,
+        SAFE_DIVIDE(COALESCE(att.visits_converted, 0), avc.total_visits) * 100 as conversion_rate,
+        COALESCE(att.new_pod_units, 0) as new_pod_units,
+        COALESCE(att.incremental_units, 0) as incremental_units,
+        COALESCE(att.total_attributed_units, 0) as total_attributed_units,
+        COALESCE(att.new_pods_count, 0) as new_pods_count
+    FROM all_visit_counts avc
+    JOIN rep_names r ON avc.rep_id = r.Id
+    LEFT JOIN attribution_stats att ON avc.rep_id = att.rep_id
+    WHERE avc.total_visits >= 5
+    ORDER BY avc.total_visits DESC
     """
     return client.query(query).to_dataframe()
 
