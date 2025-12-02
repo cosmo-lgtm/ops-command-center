@@ -449,23 +449,17 @@ def render_metric_card(value, label, sublabel=None, status="neutral"):
 
 
 def render_leaderboard_entry(rank, name, visits, conversion_rate, units, show_badges=True):
+    import html
     rank_class = {1: "leaderboard-rank-gold", 2: "leaderboard-rank-silver", 3: "leaderboard-rank-bronze"}.get(rank, "")
-    badges = ""
+    safe_name = html.escape(str(name)) if name else "Unknown"
+    badges_html = ""
     if show_badges:
         if conversion_rate >= 50:
-            badges += '<span class="attribution-badge">HIGH CONVERTER</span>'
+            badges_html += '<span class="attribution-badge">HIGH CONVERTER</span>'
         if units >= 500:
-            badges += '<span class="pod-badge">TOP SELLER</span>'
-    return f"""
-    <div class="leaderboard-card">
-        <span class="leaderboard-rank {rank_class}">#{rank}</span>
-        <span class="leaderboard-name">{name}</span>
-        {badges}
-        <div class="leaderboard-stats">
-            {visits} visits • {conversion_rate:.0f}% converted • {units:,.0f} units attributed
-        </div>
-    </div>
-    """
+            badges_html += '<span class="pod-badge">TOP SELLER</span>'
+    stats_text = f"{int(visits)} visits &bull; {conversion_rate:.0f}% converted &bull; {units:,.0f} units attributed"
+    return f'<div class="leaderboard-card"><span class="leaderboard-rank {rank_class}">#{rank}</span> <span class="leaderboard-name">{safe_name}</span>{badges_html}<div class="leaderboard-stats">{stats_text}</div></div>'
 
 
 # =============================================================================
@@ -578,9 +572,9 @@ def main():
     with col1:
         st.markdown('<p class="section-header">Rep Leaderboard (by Depletions)</p>', unsafe_allow_html=True)
         if not rep_performance.empty:
-            for idx, row in rep_performance.head(10).iterrows():
+            for rank, (idx, row) in enumerate(rep_performance.head(10).iterrows(), start=1):
                 st.markdown(render_leaderboard_entry(
-                    rank=idx + 1,
+                    rank=rank,
                     name=row['rep_name'],
                     visits=row['total_visits'],
                     conversion_rate=row['conversion_rate'] if pd.notna(row['conversion_rate']) else 0,
