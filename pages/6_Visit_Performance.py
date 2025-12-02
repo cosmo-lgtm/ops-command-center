@@ -162,6 +162,10 @@ def load_visit_summary(days_back=30):
     return client.query(query).to_dataframe().iloc[0]
 
 
+# Hardcoded attribution start date for bonus period
+ATTRIBUTION_START_DATE = '2024-11-17'
+
+
 @st.cache_data(ttl=300)
 def load_visit_attribution(days_back=30, attribution_window=30, rep_name=None):
     """Load visit attribution metrics - before/after comparison model.
@@ -186,7 +190,7 @@ def load_visit_attribution(days_back=30, attribution_window=30, rep_name=None):
           AND t.Status = 'Completed'
           AND t.CompletedDateTime IS NOT NULL
           AND t.AccountId IS NOT NULL
-          AND DATE(t.CompletedDateTime) >= DATE_SUB(CURRENT_DATE(), INTERVAL {days_back + attribution_window} DAY)
+          AND DATE(t.CompletedDateTime) >= '{ATTRIBUTION_START_DATE}'
           AND DATE(t.CompletedDateTime) <= DATE_SUB(CURRENT_DATE(), INTERVAL {attribution_window} DAY)
           {rep_filter}
     ),
@@ -286,7 +290,7 @@ def load_rep_performance(days_back=30, attribution_window=30):
           AND t.Status = 'Completed'
           AND t.CompletedDateTime IS NOT NULL
           AND t.AccountId IS NOT NULL
-          AND DATE(t.CompletedDateTime) >= DATE_SUB(CURRENT_DATE(), INTERVAL {days_back + attribution_window} DAY)
+          AND DATE(t.CompletedDateTime) >= '{ATTRIBUTION_START_DATE}'
           AND DATE(t.CompletedDateTime) <= DATE_SUB(CURRENT_DATE(), INTERVAL {attribution_window} DAY)
     ),
     rep_names AS (
@@ -406,7 +410,7 @@ def load_pod_growth(days_back=60, attribution_window=30):
           AND t.Status = 'Completed'
           AND t.CompletedDateTime IS NOT NULL
           AND t.AccountId IS NOT NULL
-          AND DATE(t.CompletedDateTime) >= DATE_SUB(CURRENT_DATE(), INTERVAL {days_back + attribution_window} DAY)
+          AND DATE(t.CompletedDateTime) >= '{ATTRIBUTION_START_DATE}'
           AND DATE(t.CompletedDateTime) <= DATE_SUB(CURRENT_DATE(), INTERVAL {attribution_window} DAY)
     ),
     account_vip_map AS (
@@ -494,7 +498,7 @@ def load_weekly_trend(weeks_back=12):
           AND t.Status = 'Completed'
           AND t.CompletedDateTime IS NOT NULL
           AND t.AccountId IS NOT NULL
-          AND DATE(t.CompletedDateTime) >= DATE_SUB(CURRENT_DATE(), INTERVAL {weeks_back * 7 + 60} DAY)
+          AND DATE(t.CompletedDateTime) >= '{ATTRIBUTION_START_DATE}'
     ),
     account_vip_map AS (
         SELECT DISTINCT
@@ -656,8 +660,10 @@ def main():
         )
 
         st.markdown("---")
-        st.markdown("""
+        st.markdown(f"""
         **Attribution Logic**
+
+        **Bonus Period**: Nov 17, 2024 onwards
 
         A visit "converts" if the account shows **growth** within the attribution window:
 
