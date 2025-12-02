@@ -414,6 +414,7 @@ def load_rep_performance(days_back=30, attribution_window=30, _cache_version=CAC
     attribution_stats AS (
         SELECT
             v.rep_id,
+            COUNT(DISTINCT v.task_id) as measurable_visits,
             COUNT(DISTINCT CASE WHEN vt.total_attributed_units > 0 THEN v.task_id END) as visits_converted,
             COALESCE(SUM(vt.new_pod_units), 0) as new_pod_units,
             COALESCE(SUM(vt.incremental_units), 0) as incremental_units,
@@ -427,8 +428,9 @@ def load_rep_performance(days_back=30, attribution_window=30, _cache_version=CAC
         r.Name as rep_name,
         avc.total_visits,
         avc.unique_accounts,
+        COALESCE(att.measurable_visits, 0) as measurable_visits,
         COALESCE(att.visits_converted, 0) as visits_converted,
-        SAFE_DIVIDE(COALESCE(att.visits_converted, 0), avc.total_visits) * 100 as conversion_rate,
+        SAFE_DIVIDE(COALESCE(att.visits_converted, 0), COALESCE(att.measurable_visits, 1)) * 100 as conversion_rate,
         COALESCE(att.new_pod_units, 0) as new_pod_units,
         COALESCE(att.incremental_units, 0) as incremental_units,
         COALESCE(att.total_attributed_units, 0) as total_attributed_units,
@@ -686,7 +688,7 @@ def render_metric_card(value, label, sublabel=None, status="neutral"):
     """
 
 
-def render_leaderboard_entry(rank, name, visits, conversion_rate, units, visits_converted=0, show_badges=True):
+def render_leaderboard_entry(rank, name, visits, conversion_rate, units, measurable_visits=0, show_badges=True):
     import html
     rank_class = {1: "leaderboard-rank-gold", 2: "leaderboard-rank-silver", 3: "leaderboard-rank-bronze"}.get(rank, "")
     safe_name = html.escape(str(name)) if name else "Unknown"
@@ -697,7 +699,7 @@ def render_leaderboard_entry(rank, name, visits, conversion_rate, units, visits_
         if units >= 500:
             badges_html += '<span class="pod-badge">TOP SELLER</span>'
     stats_text = f"{int(visits)} visits"
-    attr_text = f'<span style="color: #6b7280; font-size: 0.7rem;"> ({int(visits_converted)} measurable → {conversion_rate:.0f}% converted, {units:,.0f} units)</span>'
+    attr_text = f'<span style="color: #6b7280; font-size: 0.7rem;"> ({int(measurable_visits)} measurable → {conversion_rate:.0f}% converted, {units:,.0f} units)</span>'
     return f'<div class="leaderboard-card"><span class="leaderboard-rank {rank_class}">#{rank}</span> <span class="leaderboard-name">{safe_name}</span>{badges_html}<div class="leaderboard-stats">{stats_text}{attr_text}</div></div>'
 
 
@@ -883,7 +885,7 @@ def main():
                     visits=row['total_visits'],
                     conversion_rate=row['conversion_rate'] if pd.notna(row['conversion_rate']) else 0,
                     units=row['total_attributed_units'] if pd.notna(row['total_attributed_units']) else 0,
-                    visits_converted=row['visits_converted'] if pd.notna(row['visits_converted']) else 0
+                    measurable_visits=row['measurable_visits'] if pd.notna(row['measurable_visits']) else 0
                 ), unsafe_allow_html=True)
 
         # Bottom 5 on the right
@@ -897,7 +899,7 @@ def main():
                         visits=row['total_visits'],
                         conversion_rate=row['conversion_rate'] if pd.notna(row['conversion_rate']) else 0,
                         units=row['total_attributed_units'] if pd.notna(row['total_attributed_units']) else 0,
-                        visits_converted=row['visits_converted'] if pd.notna(row['visits_converted']) else 0
+                        measurable_visits=row['measurable_visits'] if pd.notna(row['measurable_visits']) else 0
                     ), unsafe_allow_html=True)
     else:
         st.info("No rep data available")
