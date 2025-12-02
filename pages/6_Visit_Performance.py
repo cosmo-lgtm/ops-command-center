@@ -163,8 +163,116 @@ def load_visit_summary(days_back=30):
 
 
 @st.cache_data(ttl=300)
-def load_visit_attribution(days_back=30, attribution_window=30):
-    """Load visit-to-DEPLETION attribution metrics - THE SECRET SAUCE."""
+def load_visit_attribution(days_back=30, attribution_window=30, rep_name=None):
+    """Load visit attribution metrics - before/after comparison model.
+
+    Conversion = visit led to GROWTH (new PODs or increased volume)
+    Attribution = only the incremental units, not total volume
+    """
+    client = get_bq_client()
+    rep_filter = ""
+    if rep_name and rep_name != "All Reps":
+        rep_filter = f"AND u.Name = '{rep_name}'"
+    query = f"""
+    WITH visits AS (
+        SELECT
+            t.Id as task_id,
+            t.AccountId as account_id,
+            DATE(t.CompletedDateTime) as visit_date,
+            t.OwnerId as rep_id
+        FROM `artful-logic-475116-p1.raw_salesforce.Task` t
+        JOIN `artful-logic-475116-p1.raw_salesforce.User` u ON t.OwnerId = u.Id
+        WHERE t.Subject LIKE 'Check In%'
+          AND t.Status = 'Completed'
+          AND t.CompletedDateTime IS NOT NULL
+          AND t.AccountId IS NOT NULL
+          AND DATE(t.CompletedDateTime) >= DATE_SUB(CURRENT_DATE(), INTERVAL {days_back + attribution_window} DAY)
+          AND DATE(t.CompletedDateTime) <= DATE_SUB(CURRENT_DATE(), INTERVAL {attribution_window} DAY)
+          {rep_filter}
+    ),
+    account_vip_map AS (
+        SELECT DISTINCT
+            sfdc_account_id,
+            vip_account_code
+        FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_v2`
+        WHERE sfdc_account_id IS NOT NULL
+    ),
+    -- Volume by product BEFORE visit (30d lookback)
+    volume_before AS (
+        SELECT
+            v.task_id,
+            s.product_code,
+            SUM(s.quantity) as units_before
+        FROM visits v
+        JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
+        JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
+            ON m.vip_account_code = s.account_code
+            AND s.transaction_date >= DATE_SUB(v.visit_date, INTERVAL 30 DAY)
+            AND s.transaction_date < v.visit_date
+        GROUP BY v.task_id, s.product_code
+    ),
+    -- Volume by product AFTER visit (attribution window)
+    volume_after AS (
+        SELECT
+            v.task_id,
+            s.product_code,
+            SUM(s.quantity) as units_after
+        FROM visits v
+        JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
+        JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
+            ON m.vip_account_code = s.account_code
+            AND s.transaction_date > v.visit_date
+            AND s.transaction_date <= DATE_ADD(v.visit_date, INTERVAL {attribution_window} DAY)
+        GROUP BY v.task_id, s.product_code
+    ),
+    -- Calculate attribution per visit
+    visit_attribution AS (
+        SELECT
+            COALESCE(a.task_id, b.task_id) as task_id,
+            COALESCE(a.product_code, b.product_code) as product_code,
+            COALESCE(b.units_before, 0) as units_before,
+            COALESCE(a.units_after, 0) as units_after,
+            -- New POD = product bought after but not before
+            CASE WHEN b.units_before IS NULL AND a.units_after > 0 THEN a.units_after ELSE 0 END as new_pod_units,
+            -- Incremental = growth in existing products (only positive delta)
+            CASE WHEN b.units_before IS NOT NULL AND a.units_after > b.units_before
+                 THEN a.units_after - b.units_before ELSE 0 END as incremental_units
+        FROM volume_after a
+        FULL OUTER JOIN volume_before b
+            ON a.task_id = b.task_id AND a.product_code = b.product_code
+        WHERE a.units_after IS NOT NULL  -- Only care about post-visit activity
+    ),
+    -- Aggregate to visit level
+    visit_totals AS (
+        SELECT
+            task_id,
+            SUM(new_pod_units) as new_pod_units,
+            SUM(incremental_units) as incremental_units,
+            SUM(new_pod_units + incremental_units) as total_attributed_units,
+            COUNT(DISTINCT CASE WHEN new_pod_units > 0 THEN product_code END) as new_pods_count
+        FROM visit_attribution
+        GROUP BY task_id
+    )
+    SELECT
+        COUNT(DISTINCT v.task_id) as total_visits_in_window,
+        COUNT(DISTINCT CASE WHEN vt.total_attributed_units > 0 THEN v.task_id END) as visits_converted,
+        SAFE_DIVIDE(
+            COUNT(DISTINCT CASE WHEN vt.total_attributed_units > 0 THEN v.task_id END),
+            COUNT(DISTINCT v.task_id)
+        ) * 100 as conversion_rate,
+        COALESCE(SUM(vt.new_pod_units), 0) as new_pod_units,
+        COALESCE(SUM(vt.incremental_units), 0) as incremental_units,
+        COALESCE(SUM(vt.total_attributed_units), 0) as total_attributed_units,
+        COALESCE(SUM(vt.new_pods_count), 0) as total_new_pods
+    FROM visits v
+    LEFT JOIN visit_totals vt ON v.task_id = vt.task_id
+    """
+    return client.query(query).to_dataframe().iloc[0]
+
+
+@st.cache_data(ttl=300)
+def load_rep_performance(days_back=30, attribution_window=30):
+    """Load rep-level performance with before/after attribution model."""
     client = get_bq_client()
     query = f"""
     WITH visits AS (
@@ -180,63 +288,6 @@ def load_visit_attribution(days_back=30, attribution_window=30):
           AND t.AccountId IS NOT NULL
           AND DATE(t.CompletedDateTime) >= DATE_SUB(CURRENT_DATE(), INTERVAL {days_back + attribution_window} DAY)
           AND DATE(t.CompletedDateTime) <= DATE_SUB(CURRENT_DATE(), INTERVAL {attribution_window} DAY)
-    ),
-    account_vip_map AS (
-        SELECT DISTINCT
-            sfdc_account_id,
-            vip_account_code
-        FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_v2`
-        WHERE sfdc_account_id IS NOT NULL
-    ),
-    depletions_post_visit AS (
-        SELECT
-            v.task_id,
-            v.account_id,
-            v.visit_date,
-            v.rep_id,
-            s.transaction_date,
-            s.quantity,
-            DATE_DIFF(s.transaction_date, v.visit_date, DAY) as days_to_depletion
-        FROM visits v
-        JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
-        JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
-            ON m.vip_account_code = s.account_code
-            AND s.transaction_date > v.visit_date
-            AND s.transaction_date <= DATE_ADD(v.visit_date, INTERVAL {attribution_window} DAY)
-    )
-    SELECT
-        COUNT(DISTINCT v.task_id) as total_visits_in_window,
-        COUNT(DISTINCT CASE WHEN d.task_id IS NOT NULL THEN v.task_id END) as visits_with_depletions,
-        SAFE_DIVIDE(
-            COUNT(DISTINCT CASE WHEN d.task_id IS NOT NULL THEN v.task_id END),
-            COUNT(DISTINCT v.task_id)
-        ) * 100 as conversion_rate,
-        COALESCE(SUM(d.quantity), 0) as total_units_attributed,
-        COALESCE(AVG(d.days_to_depletion), 0) as avg_days_to_depletion,
-        COUNT(DISTINCT d.account_id) as accounts_with_depletions
-    FROM visits v
-    LEFT JOIN depletions_post_visit d ON v.task_id = d.task_id
-    """
-    return client.query(query).to_dataframe().iloc[0]
-
-
-@st.cache_data(ttl=300)
-def load_rep_performance(days_back=30, attribution_window=30):
-    """Load rep-level performance with depletion attribution."""
-    client = get_bq_client()
-    query = f"""
-    WITH visits AS (
-        SELECT
-            t.Id as task_id,
-            t.AccountId as account_id,
-            DATE(t.CompletedDateTime) as visit_date,
-            t.OwnerId as rep_id
-        FROM `artful-logic-475116-p1.raw_salesforce.Task` t
-        WHERE t.Subject LIKE 'Check In%'
-          AND t.Status = 'Completed'
-          AND t.CompletedDateTime IS NOT NULL
-          AND t.AccountId IS NOT NULL
-          AND DATE(t.CompletedDateTime) >= DATE_SUB(CURRENT_DATE(), INTERVAL {days_back} DAY)
     ),
     rep_names AS (
         SELECT Id, Name
@@ -249,58 +300,107 @@ def load_rep_performance(days_back=30, attribution_window=30):
         FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_v2`
         WHERE sfdc_account_id IS NOT NULL
     ),
-    depletions_post_visit AS (
+    -- Volume by product BEFORE visit (30d lookback)
+    volume_before AS (
         SELECT
             v.task_id,
             v.rep_id,
-            s.quantity,
-            DATE_DIFF(s.transaction_date, v.visit_date, DAY) as days_to_depletion
+            s.product_code,
+            SUM(s.quantity) as units_before
+        FROM visits v
+        JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
+        JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
+            ON m.vip_account_code = s.account_code
+            AND s.transaction_date >= DATE_SUB(v.visit_date, INTERVAL 30 DAY)
+            AND s.transaction_date < v.visit_date
+        GROUP BY v.task_id, v.rep_id, s.product_code
+    ),
+    -- Volume by product AFTER visit (attribution window)
+    volume_after AS (
+        SELECT
+            v.task_id,
+            v.rep_id,
+            s.product_code,
+            SUM(s.quantity) as units_after
         FROM visits v
         JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
         JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
             ON m.vip_account_code = s.account_code
             AND s.transaction_date > v.visit_date
             AND s.transaction_date <= DATE_ADD(v.visit_date, INTERVAL {attribution_window} DAY)
+        GROUP BY v.task_id, v.rep_id, s.product_code
     ),
+    -- Calculate attribution per visit/product
+    visit_attribution AS (
+        SELECT
+            COALESCE(a.task_id, b.task_id) as task_id,
+            COALESCE(a.rep_id, b.rep_id) as rep_id,
+            COALESCE(a.product_code, b.product_code) as product_code,
+            COALESCE(b.units_before, 0) as units_before,
+            COALESCE(a.units_after, 0) as units_after,
+            CASE WHEN b.units_before IS NULL AND a.units_after > 0 THEN a.units_after ELSE 0 END as new_pod_units,
+            CASE WHEN b.units_before IS NOT NULL AND a.units_after > b.units_before
+                 THEN a.units_after - b.units_before ELSE 0 END as incremental_units
+        FROM volume_after a
+        FULL OUTER JOIN volume_before b
+            ON a.task_id = b.task_id AND a.product_code = b.product_code
+        WHERE a.units_after IS NOT NULL
+    ),
+    -- Aggregate to visit level
+    visit_totals AS (
+        SELECT
+            task_id,
+            rep_id,
+            SUM(new_pod_units) as new_pod_units,
+            SUM(incremental_units) as incremental_units,
+            SUM(new_pod_units + incremental_units) as total_attributed_units,
+            COUNT(DISTINCT CASE WHEN new_pod_units > 0 THEN product_code END) as new_pods_count
+        FROM visit_attribution
+        GROUP BY task_id, rep_id
+    ),
+    -- Aggregate to rep level
     rep_stats AS (
         SELECT
             v.rep_id,
             COUNT(DISTINCT v.task_id) as total_visits,
             COUNT(DISTINCT v.account_id) as unique_accounts,
-            COUNT(DISTINCT CASE WHEN d.task_id IS NOT NULL THEN v.task_id END) as visits_with_depletions,
-            COALESCE(SUM(d.quantity), 0) as units_attributed,
-            COALESCE(AVG(d.days_to_depletion), 0) as avg_days_to_depletion
+            COUNT(DISTINCT CASE WHEN vt.total_attributed_units > 0 THEN v.task_id END) as visits_converted,
+            COALESCE(SUM(vt.new_pod_units), 0) as new_pod_units,
+            COALESCE(SUM(vt.incremental_units), 0) as incremental_units,
+            COALESCE(SUM(vt.total_attributed_units), 0) as total_attributed_units,
+            COALESCE(SUM(vt.new_pods_count), 0) as new_pods_count
         FROM visits v
-        LEFT JOIN depletions_post_visit d ON v.task_id = d.task_id
+        LEFT JOIN visit_totals vt ON v.task_id = vt.task_id
         GROUP BY v.rep_id
     )
     SELECT
         r.Name as rep_name,
         s.total_visits,
         s.unique_accounts,
-        s.visits_with_depletions,
-        SAFE_DIVIDE(s.visits_with_depletions, s.total_visits) * 100 as conversion_rate,
-        s.units_attributed,
-        s.avg_days_to_depletion
+        s.visits_converted,
+        SAFE_DIVIDE(s.visits_converted, s.total_visits) * 100 as conversion_rate,
+        s.new_pod_units,
+        s.incremental_units,
+        s.total_attributed_units,
+        s.new_pods_count
     FROM rep_stats s
     JOIN rep_names r ON s.rep_id = r.Id
     WHERE s.total_visits >= 5
-    ORDER BY s.units_attributed DESC
+    ORDER BY s.total_attributed_units DESC
     """
     return client.query(query).to_dataframe()
 
 
 @st.cache_data(ttl=300)
 def load_pod_growth(days_back=60, attribution_window=30):
-    """Load POD growth after visits."""
+    """Load POD growth metrics - counts NEW SKUs added after visits."""
     client = get_bq_client()
     query = f"""
     WITH visits AS (
         SELECT
             t.Id as task_id,
             t.AccountId as account_id,
-            DATE(t.CompletedDateTime) as visit_date,
-            t.OwnerId as rep_id
+            DATE(t.CompletedDateTime) as visit_date
         FROM `artful-logic-475116-p1.raw_salesforce.Task` t
         WHERE t.Subject LIKE 'Check In%'
           AND t.Status = 'Completed'
@@ -316,52 +416,71 @@ def load_pod_growth(days_back=60, attribution_window=30):
         FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_v2`
         WHERE sfdc_account_id IS NOT NULL
     ),
+    -- Products bought BEFORE visit
     pods_before AS (
-        SELECT
+        SELECT DISTINCT
             v.task_id,
-            v.account_id,
-            COUNT(DISTINCT s.product_code) as pod_count_before
+            s.product_code
         FROM visits v
         JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
         JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
             ON m.vip_account_code = s.account_code
             AND s.transaction_date >= DATE_SUB(v.visit_date, INTERVAL 30 DAY)
             AND s.transaction_date < v.visit_date
-        GROUP BY v.task_id, v.account_id
     ),
+    -- Products bought AFTER visit
     pods_after AS (
-        SELECT
+        SELECT DISTINCT
             v.task_id,
-            v.account_id,
-            COUNT(DISTINCT s.product_code) as pod_count_after
+            s.product_code
         FROM visits v
         JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
         JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
             ON m.vip_account_code = s.account_code
             AND s.transaction_date > v.visit_date
             AND s.transaction_date <= DATE_ADD(v.visit_date, INTERVAL {attribution_window} DAY)
-        GROUP BY v.task_id, v.account_id
+    ),
+    -- NEW PODs = products in after but not in before
+    new_pods AS (
+        SELECT
+            a.task_id,
+            COUNT(DISTINCT a.product_code) as new_pod_count
+        FROM pods_after a
+        LEFT JOIN pods_before b ON a.task_id = b.task_id AND a.product_code = b.product_code
+        WHERE b.product_code IS NULL  -- Not in before period
+        GROUP BY a.task_id
+    ),
+    -- POD counts before/after for context
+    pod_counts AS (
+        SELECT
+            v.task_id,
+            COUNT(DISTINCT b.product_code) as pods_before,
+            COUNT(DISTINCT a.product_code) as pods_after
+        FROM visits v
+        LEFT JOIN pods_before b ON v.task_id = b.task_id
+        LEFT JOIN pods_after a ON v.task_id = a.task_id
+        GROUP BY v.task_id
     )
     SELECT
-        COUNT(DISTINCT v.task_id) as visits_with_pod_data,
-        AVG(COALESCE(b.pod_count_before, 0)) as avg_pods_before,
-        AVG(COALESCE(a.pod_count_after, 0)) as avg_pods_after,
-        SUM(CASE WHEN COALESCE(a.pod_count_after, 0) > COALESCE(b.pod_count_before, 0) THEN 1 ELSE 0 END) as visits_with_pod_increase,
+        COUNT(DISTINCT v.task_id) as total_visits,
+        COUNT(DISTINCT CASE WHEN np.new_pod_count > 0 THEN v.task_id END) as visits_with_new_pods,
         SAFE_DIVIDE(
-            SUM(CASE WHEN COALESCE(a.pod_count_after, 0) > COALESCE(b.pod_count_before, 0) THEN 1 ELSE 0 END),
+            COUNT(DISTINCT CASE WHEN np.new_pod_count > 0 THEN v.task_id END),
             COUNT(DISTINCT v.task_id)
-        ) * 100 as pod_increase_rate
+        ) * 100 as new_pod_rate,
+        COALESCE(SUM(np.new_pod_count), 0) as total_new_pods,
+        AVG(pc.pods_before) as avg_pods_before,
+        AVG(pc.pods_after) as avg_pods_after
     FROM visits v
-    LEFT JOIN pods_before b ON v.task_id = b.task_id
-    LEFT JOIN pods_after a ON v.task_id = a.task_id
-    WHERE b.pod_count_before IS NOT NULL OR a.pod_count_after IS NOT NULL
+    LEFT JOIN new_pods np ON v.task_id = np.task_id
+    LEFT JOIN pod_counts pc ON v.task_id = pc.task_id
     """
     return client.query(query).to_dataframe().iloc[0]
 
 
 @st.cache_data(ttl=300)
 def load_weekly_trend(weeks_back=12):
-    """Load weekly visit and depletion attribution trend."""
+    """Load weekly visit attribution trend - before/after comparison model."""
     client = get_bq_client()
     query = f"""
     WITH visits AS (
@@ -375,7 +494,7 @@ def load_weekly_trend(weeks_back=12):
           AND t.Status = 'Completed'
           AND t.CompletedDateTime IS NOT NULL
           AND t.AccountId IS NOT NULL
-          AND DATE(t.CompletedDateTime) >= DATE_SUB(CURRENT_DATE(), INTERVAL {weeks_back * 7 + 30} DAY)
+          AND DATE(t.CompletedDateTime) >= DATE_SUB(CURRENT_DATE(), INTERVAL {weeks_back * 7 + 60} DAY)
     ),
     account_vip_map AS (
         SELECT DISTINCT
@@ -384,27 +503,65 @@ def load_weekly_trend(weeks_back=12):
         FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_v2`
         WHERE sfdc_account_id IS NOT NULL
     ),
-    depletions_post_visit AS (
-        SELECT DISTINCT
+    -- Volume by product BEFORE visit
+    volume_before AS (
+        SELECT
             v.task_id,
-            v.visit_week
+            s.product_code,
+            SUM(s.quantity) as units_before
+        FROM visits v
+        JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
+        JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
+            ON m.vip_account_code = s.account_code
+            AND s.transaction_date >= DATE_SUB(v.visit_date, INTERVAL 30 DAY)
+            AND s.transaction_date < v.visit_date
+        GROUP BY v.task_id, s.product_code
+    ),
+    -- Volume by product AFTER visit
+    volume_after AS (
+        SELECT
+            v.task_id,
+            s.product_code,
+            SUM(s.quantity) as units_after
         FROM visits v
         JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
         JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
             ON m.vip_account_code = s.account_code
             AND s.transaction_date > v.visit_date
             AND s.transaction_date <= DATE_ADD(v.visit_date, INTERVAL 30 DAY)
+        GROUP BY v.task_id, s.product_code
+    ),
+    -- Calculate attribution per visit
+    visit_attribution AS (
+        SELECT
+            COALESCE(a.task_id, b.task_id) as task_id,
+            CASE WHEN b.units_before IS NULL AND a.units_after > 0 THEN a.units_after ELSE 0 END as new_pod_units,
+            CASE WHEN b.units_before IS NOT NULL AND a.units_after > b.units_before
+                 THEN a.units_after - b.units_before ELSE 0 END as incremental_units
+        FROM volume_after a
+        FULL OUTER JOIN volume_before b
+            ON a.task_id = b.task_id AND a.product_code = b.product_code
+        WHERE a.units_after IS NOT NULL
+    ),
+    -- Aggregate to visit level
+    visit_totals AS (
+        SELECT
+            task_id,
+            SUM(new_pod_units + incremental_units) as total_attributed_units
+        FROM visit_attribution
+        GROUP BY task_id
     )
     SELECT
         v.visit_week,
         COUNT(DISTINCT v.task_id) as total_visits,
-        COUNT(DISTINCT CASE WHEN d.task_id IS NOT NULL THEN v.task_id END) as visits_converted,
+        COUNT(DISTINCT CASE WHEN vt.total_attributed_units > 0 THEN v.task_id END) as visits_converted,
         SAFE_DIVIDE(
-            COUNT(DISTINCT CASE WHEN d.task_id IS NOT NULL THEN v.task_id END),
+            COUNT(DISTINCT CASE WHEN vt.total_attributed_units > 0 THEN v.task_id END),
             COUNT(DISTINCT v.task_id)
-        ) * 100 as conversion_rate
+        ) * 100 as conversion_rate,
+        COALESCE(SUM(vt.total_attributed_units), 0) as total_attributed_units
     FROM visits v
-    LEFT JOIN depletions_post_visit d ON v.task_id = d.task_id
+    LEFT JOIN visit_totals vt ON v.task_id = vt.task_id
     WHERE v.visit_week <= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
     GROUP BY v.visit_week
     ORDER BY v.visit_week
@@ -482,13 +639,32 @@ def main():
             index=2,
             format_func=lambda x: f"{x} days post-visit"
         )
+
+        # Load rep list for filter (we'll load full data later)
+        # Use session state to avoid reloading rep list on every interaction
+        if 'rep_list' not in st.session_state:
+            try:
+                rep_data = load_rep_performance(days_back, attribution_window)
+                st.session_state.rep_list = ['All Reps'] + sorted(rep_data['rep_name'].tolist())
+            except Exception:
+                st.session_state.rep_list = ['All Reps']
+
+        selected_rep = st.selectbox(
+            "Select Rep",
+            options=st.session_state.rep_list,
+            index=0
+        )
+
         st.markdown("---")
         st.markdown("""
         **Attribution Logic**
 
-        Visits are credited with depletions (sell-through) at the same account within the attribution window.
+        A visit "converts" if the account shows **growth** within the attribution window:
 
-        **POD Growth** tracks SKU expansion after visits.
+        - **New POD Units**: Volume from SKUs not bought in prior 30 days
+        - **Incremental Units**: Volume increase on existing SKUs
+
+        Only the **delta** (growth) is attributed, not total volume.
         """)
 
     # Header
@@ -508,17 +684,21 @@ def main():
     # Load data
     try:
         visit_summary = load_visit_summary(days_back)
-        attribution = load_visit_attribution(days_back, attribution_window)
+        attribution = load_visit_attribution(days_back, attribution_window, selected_rep)
         rep_performance = load_rep_performance(days_back, attribution_window)
         pod_growth = load_pod_growth(days_back, attribution_window)
         weekly_trend = load_weekly_trend(12)
         visits_this_week = load_this_week_visits()
+
+        # Filter rep_performance if a specific rep is selected
+        if selected_rep and selected_rep != "All Reps":
+            rep_performance = rep_performance[rep_performance['rep_name'] == selected_rep]
     except Exception as e:
         st.error(f"Error loading data: {e}")
         return
 
     # Row 1: Key Metrics
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
 
     with col1:
         st.markdown(render_metric_card(
@@ -530,38 +710,47 @@ def main():
 
     with col2:
         st.markdown(render_metric_card(
-            f"{visit_summary['total_visits']:,}",
-            f"Visits ({days_back}d)",
-            f"{visit_summary['unique_accounts']:,} accounts",
+            f"{attribution['total_visits_in_window']:,}",
+            f"Visits (w/ {attribution_window}d window)",
+            f"Eligible for attribution",
             "neutral"
         ), unsafe_allow_html=True)
 
     with col3:
-        conv_rate = attribution['conversion_rate']
-        conv_status = "healthy" if conv_rate >= 30 else "gold" if conv_rate >= 15 else "critical"
+        conv_rate = attribution['conversion_rate'] if pd.notna(attribution['conversion_rate']) else 0
+        conv_status = "healthy" if conv_rate >= 20 else "gold" if conv_rate >= 10 else "critical"
         st.markdown(render_metric_card(
             f"{conv_rate:.1f}%",
             "Conversion Rate",
-            f"{attribution['visits_with_depletions']:,.0f} visits → depletions",
+            f"{attribution['visits_converted']:,.0f} visits with growth",
             conv_status
         ), unsafe_allow_html=True)
 
     with col4:
+        new_pod_units = attribution['new_pod_units'] if pd.notna(attribution['new_pod_units']) else 0
         st.markdown(render_metric_card(
-            f"{attribution['total_units_attributed']:,.0f}",
-            "Units Attributed",
-            f"Avg {attribution['avg_days_to_depletion']:.1f} days to depletion",
-            "gold"
+            f"{new_pod_units:,.0f}",
+            "New POD Units",
+            f"{attribution['total_new_pods']:,.0f} new SKUs added",
+            "healthy"
         ), unsafe_allow_html=True)
 
     with col5:
-        pod_rate = pod_growth['pod_increase_rate'] if pd.notna(pod_growth['pod_increase_rate']) else 0
-        pod_status = "healthy" if pod_rate >= 20 else "gold" if pod_rate >= 10 else "neutral"
+        incremental_units = attribution['incremental_units'] if pd.notna(attribution['incremental_units']) else 0
         st.markdown(render_metric_card(
-            f"{pod_rate:.1f}%",
-            "POD Increase Rate",
-            "Visits with SKU expansion",
-            pod_status
+            f"{incremental_units:,.0f}",
+            "Incremental Units",
+            "Growth on existing SKUs",
+            "gold"
+        ), unsafe_allow_html=True)
+
+    with col6:
+        total_attributed = attribution['total_attributed_units'] if pd.notna(attribution['total_attributed_units']) else 0
+        st.markdown(render_metric_card(
+            f"{total_attributed:,.0f}",
+            "Total Attributed",
+            "New POD + Incremental",
+            "neutral"
         ), unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -570,7 +759,7 @@ def main():
     col1, col2 = st.columns([1, 2])
 
     with col1:
-        st.markdown('<p class="section-header">Rep Leaderboard (by Depletions)</p>', unsafe_allow_html=True)
+        st.markdown('<p class="section-header">Rep Leaderboard (by Attribution)</p>', unsafe_allow_html=True)
         if not rep_performance.empty:
             for rank, (idx, row) in enumerate(rep_performance.head(10).iterrows(), start=1):
                 st.markdown(render_leaderboard_entry(
@@ -578,13 +767,13 @@ def main():
                     name=row['rep_name'],
                     visits=row['total_visits'],
                     conversion_rate=row['conversion_rate'] if pd.notna(row['conversion_rate']) else 0,
-                    units=row['units_attributed']
+                    units=row['total_attributed_units'] if pd.notna(row['total_attributed_units']) else 0
                 ), unsafe_allow_html=True)
         else:
             st.info("No rep data available")
 
     with col2:
-        st.markdown('<p class="section-header">Weekly Depletion Attribution Trend</p>', unsafe_allow_html=True)
+        st.markdown('<p class="section-header">Weekly Attribution Trend</p>', unsafe_allow_html=True)
         if not weekly_trend.empty:
             fig = go.Figure()
             fig.add_trace(go.Bar(
@@ -597,7 +786,7 @@ def main():
             fig.add_trace(go.Bar(
                 x=weekly_trend['visit_week'],
                 y=weekly_trend['visits_converted'],
-                name='Visits w/ Depletions',
+                name='Visits w/ Growth',
                 marker_color=COLORS['success'],
                 opacity=0.9
             ))
@@ -629,10 +818,18 @@ def main():
     st.markdown('<p class="section-header">Rep Performance Details</p>', unsafe_allow_html=True)
     if not rep_performance.empty:
         display_df = rep_performance.copy()
-        display_df.columns = ['Rep', 'Visits', 'Accounts', 'w/ Depletions', 'Conv %', 'Units', 'Avg Days']
+        # Columns: rep_name, total_visits, unique_accounts, visits_converted, conversion_rate,
+        #          new_pod_units, incremental_units, total_attributed_units, new_pods_count
+        display_df = display_df[['rep_name', 'total_visits', 'unique_accounts', 'visits_converted',
+                                  'conversion_rate', 'new_pod_units', 'incremental_units',
+                                  'total_attributed_units', 'new_pods_count']]
+        display_df.columns = ['Rep', 'Visits', 'Accounts', 'Converted', 'Conv %',
+                              'New POD Units', 'Incremental', 'Total Attributed', 'New PODs']
         display_df['Conv %'] = display_df['Conv %'].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else "0%")
-        display_df['Units'] = display_df['Units'].apply(lambda x: f"{x:,.0f}")
-        display_df['Avg Days'] = display_df['Avg Days'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "-")
+        display_df['New POD Units'] = display_df['New POD Units'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "0")
+        display_df['Incremental'] = display_df['Incremental'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "0")
+        display_df['Total Attributed'] = display_df['Total Attributed'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "0")
+        display_df['New PODs'] = display_df['New PODs'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "0")
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
     # Footer
