@@ -199,6 +199,18 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
+        st.markdown("""
+        <div class="dashboard-card">
+            <div class="card-icon">🚀</div>
+            <div class="card-title">Visit Performance</div>
+            <div class="card-description">
+                Sales rep check-in attribution - visit-to-depletion conversion, POD growth tracking.
+                <br><br>
+                <strong>Key Metrics:</strong> Conversion Rate, Units Attributed, POD Increase Rate
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
     # Navigation hint
     st.markdown("""
     <div style="text-align: center; margin-top: 48px; color: #8892b0;">
