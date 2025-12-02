@@ -28,161 +28,67 @@ st.markdown("""
         padding-right: 2rem !important;
     }
 
-    /* Main background */
     .stApp {
         background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%);
     }
-
-    /* Hide Streamlit branding */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
 
-    /* Custom metric cards */
+    /* Base styles (mobile-first) */
     .metric-card {
         background: linear-gradient(145deg, #1e1e2f 0%, #2a2a4a 100%);
-        border-radius: 16px;
-        padding: 24px;
+        border-radius: 12px;
+        padding: 16px;
         border: 1px solid rgba(255,255,255,0.1);
         box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        margin-bottom: 12px;
     }
-
     .metric-card:hover {
-        transform: translateY(-4px);
+        transform: translateY(-2px);
         box-shadow: 0 12px 40px rgba(0,0,0,0.4);
     }
+    .metric-value { font-size: clamp(1.5rem, 4vw, 2.625rem); font-weight: 700; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; }
+    .metric-label { font-size: clamp(0.7rem, 1.5vw, 0.875rem); color: #8892b0; text-transform: uppercase; letter-spacing: 1px; margin-top: 6px; }
+    .metric-delta-positive { color: #64ffda; font-size: clamp(0.65rem, 1.2vw, 0.875rem); }
+    .metric-delta-negative { color: #ff6b6b; font-size: clamp(0.65rem, 1.2vw, 0.875rem); }
 
-    .metric-value {
-        font-size: 42px;
-        font-weight: 700;
-        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin: 0;
-    }
+    .dashboard-header { background: linear-gradient(90deg, #f093fb 0%, #f5576c 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: clamp(1.75rem, 5vw, 3rem); font-weight: 800; margin-bottom: 8px; }
+    .dashboard-subtitle { color: #8892b0; font-size: clamp(0.875rem, 2vw, 1rem); margin-bottom: 24px; }
+    .section-header { color: #ccd6f6; font-size: clamp(1.1rem, 2.5vw, 1.5rem); font-weight: 600; margin: 24px 0 12px 0; padding-bottom: 8px; border-bottom: 2px solid rgba(240, 147, 251, 0.3); }
 
-    .metric-label {
-        font-size: 14px;
-        color: #8892b0;
-        text-transform: uppercase;
-        letter-spacing: 1.5px;
-        margin-top: 8px;
-    }
+    /* Status badges - responsive */
+    .status-healthy { background: rgba(100, 255, 218, 0.2); color: #64ffda; padding: 3px 10px; border-radius: 20px; font-size: clamp(0.65rem, 1.2vw, 0.75rem); font-weight: 600; }
+    .status-warning { background: rgba(255, 214, 102, 0.2); color: #ffd666; padding: 3px 10px; border-radius: 20px; font-size: clamp(0.65rem, 1.2vw, 0.75rem); font-weight: 600; }
+    .status-critical { background: rgba(255, 107, 107, 0.2); color: #ff6b6b; padding: 3px 10px; border-radius: 20px; font-size: clamp(0.65rem, 1.2vw, 0.75rem); font-weight: 600; }
 
-    .metric-delta-positive {
-        color: #64ffda;
-        font-size: 14px;
-    }
-
-    .metric-delta-negative {
-        color: #ff6b6b;
-        font-size: 14px;
-    }
-
-    /* Header styling */
-    .dashboard-header {
-        background: linear-gradient(90deg, #f093fb 0%, #f5576c 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-size: 48px;
-        font-weight: 800;
-        margin-bottom: 8px;
-    }
-
-    .dashboard-subtitle {
-        color: #8892b0;
-        font-size: 16px;
-        margin-bottom: 32px;
-    }
-
-    /* Section headers */
-    .section-header {
-        color: #ccd6f6;
-        font-size: 24px;
-        font-weight: 600;
-        margin: 32px 0 16px 0;
-        padding-bottom: 8px;
-        border-bottom: 2px solid rgba(240, 147, 251, 0.3);
-    }
-
-    /* Status badges */
-    .status-badge {
-        display: inline-block;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 12px;
-        font-weight: 600;
-        text-transform: uppercase;
-    }
-
-    .status-healthy {
-        background: rgba(100, 255, 218, 0.2);
-        color: #64ffda;
-    }
-
-    .status-warning {
-        background: rgba(255, 214, 102, 0.2);
-        color: #ffd666;
-    }
-
-    .status-critical {
-        background: rgba(255, 107, 107, 0.2);
-        color: #ff6b6b;
-    }
-
-    /* Table styling */
-    .dataframe {
-        background: #1e1e2f !important;
-        border-radius: 12px;
-    }
-
-    .dataframe th {
-        background: #2a2a4a !important;
-        color: #ccd6f6 !important;
-    }
-
-    .dataframe td {
-        color: #8892b0 !important;
-    }
-
-    /* Live indicator */
-    .live-indicator {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        color: #64ffda;
-        font-size: 12px;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
-
-    .live-dot {
-        width: 8px;
-        height: 8px;
-        background: #64ffda;
-        border-radius: 50%;
-        animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-        0%, 100% { opacity: 1; transform: scale(1); }
-        50% { opacity: 0.5; transform: scale(1.2); }
-    }
+    .live-indicator { display: inline-flex; align-items: center; gap: 8px; color: #64ffda; font-size: clamp(0.65rem, 1.5vw, 0.75rem); text-transform: uppercase; letter-spacing: 1px; }
+    .live-dot { width: 8px; height: 8px; background: #64ffda; border-radius: 50%; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.2); } }
 
     /* Scrollbar */
-    ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #1a1a2e; }
+    ::-webkit-scrollbar-thumb { background: #f093fb; border-radius: 4px; }
+
+    /* Tablet breakpoint */
+    @media (max-width: 992px) {
+        .block-container {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
     }
 
-    ::-webkit-scrollbar-track {
-        background: #1a1a2e;
-    }
-
-    ::-webkit-scrollbar-thumb {
-        background: #f093fb;
-        border-radius: 4px;
+    /* Mobile breakpoint */
+    @media (max-width: 640px) {
+        .block-container {
+            padding-left: 0.5rem !important;
+            padding-right: 0.5rem !important;
+        }
+        .metric-card {
+            padding: 12px;
+            border-radius: 8px;
+        }
     }
 </style>
 """, unsafe_allow_html=True)

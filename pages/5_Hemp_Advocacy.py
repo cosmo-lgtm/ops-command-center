@@ -43,7 +43,7 @@ st.markdown("""
         backdrop-filter: blur(20px);
         border: 1px solid rgba(255, 255, 255, 0.08);
         border-radius: 20px;
-        padding: 28px;
+        padding: clamp(16px, 3vw, 28px);
         text-align: center;
         transition: all 0.3s ease;
         position: relative;
@@ -62,7 +62,7 @@ st.markdown("""
         box-shadow: 0 20px 40px rgba(16, 185, 129, 0.1);
     }
     .metric-value {
-        font-size: 2.8rem;
+        font-size: clamp(1.75rem, 5vw, 2.8rem);
         font-weight: 700;
         background: linear-gradient(135deg, #10b981 0%, #34d399 50%, #6ee7b7 100%);
         -webkit-background-clip: text;
@@ -70,14 +70,14 @@ st.markdown("""
         margin-bottom: 8px;
     }
     .metric-label {
-        font-size: 0.85rem;
+        font-size: clamp(0.7rem, 1.5vw, 0.85rem);
         color: #9ca3af;
         text-transform: uppercase;
         letter-spacing: 1.5px;
         font-weight: 500;
     }
     .metric-change {
-        font-size: 0.8rem;
+        font-size: clamp(0.65rem, 1.2vw, 0.8rem);
         color: #10b981;
         margin-top: 12px;
         display: inline-flex;
@@ -88,7 +88,7 @@ st.markdown("""
         border-radius: 20px;
     }
     .section-header {
-        font-size: 1.4rem;
+        font-size: clamp(1.1rem, 2.5vw, 1.4rem);
         font-weight: 600;
         color: #f3f4f6;
         padding-bottom: 12px;
@@ -114,11 +114,11 @@ st.markdown("""
         backdrop-filter: blur(10px);
         border: 1px solid rgba(255, 255, 255, 0.05);
         border-radius: 16px;
-        padding: 32px;
+        padding: clamp(20px, 4vw, 32px);
         text-align: center;
     }
     .stat-value {
-        font-size: 3.5rem;
+        font-size: clamp(2rem, 6vw, 3.5rem);
         font-weight: 700;
         background: linear-gradient(135deg, #10b981, #34d399);
         -webkit-background-clip: text;
@@ -126,7 +126,7 @@ st.markdown("""
     }
     .stat-label {
         color: #9ca3af;
-        font-size: 0.9rem;
+        font-size: clamp(0.75rem, 1.5vw, 0.9rem);
         margin-top: 8px;
         line-height: 1.5;
     }
@@ -161,16 +161,37 @@ st.markdown("""
     }
     .key-section h3 {
         color: #10b981;
-        font-size: 1.1rem;
+        font-size: clamp(0.95rem, 2vw, 1.1rem);
         margin-bottom: 16px;
     }
     .key-section ul { list-style: none; padding: 0; }
     .key-section li {
         padding: 8px 0;
         color: #d1d5db;
+        font-size: clamp(0.8rem, 1.5vw, 0.95rem);
         border-bottom: 1px solid rgba(255,255,255,0.05);
     }
     .key-section li:last-child { border-bottom: none; }
+
+    /* Tablet breakpoint */
+    @media (max-width: 992px) {
+        .block-container {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
+    }
+
+    /* Mobile breakpoint */
+    @media (max-width: 640px) {
+        .block-container {
+            padding-left: 0.5rem !important;
+            padding-right: 0.5rem !important;
+        }
+        .metric-card {
+            padding: 16px;
+            border-radius: 12px;
+        }
+    }
     .status-item {
         display: flex;
         align-items: center;

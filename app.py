@@ -23,7 +23,6 @@ st.markdown("""
         padding-right: 2rem !important;
     }
 
-    /* Main background */
     .stApp {
         background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%);
     }
@@ -49,7 +48,6 @@ st.markdown("""
         display: none !important;
     }
 
-    /* Hide Streamlit branding */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
@@ -70,64 +68,47 @@ st.markdown("""
         box-shadow: 0 12px 40px rgba(0,0,0,0.4);
     }
 
-    .card-icon {
-        font-size: 48px;
-        margin-bottom: 16px;
-    }
-
-    .card-title {
-        font-size: 24px;
-        font-weight: 700;
-        color: #ccd6f6;
-        margin-bottom: 8px;
-    }
-
-    .card-description {
-        font-size: 14px;
-        color: #8892b0;
-        line-height: 1.6;
-    }
+    .card-icon { font-size: clamp(2rem, 6vw, 3rem); margin-bottom: 16px; }
+    .card-title { font-size: clamp(1.25rem, 3vw, 1.5rem); font-weight: 700; color: #ccd6f6; margin-bottom: 8px; }
+    .card-description { font-size: clamp(0.8rem, 1.5vw, 0.875rem); color: #8892b0; line-height: 1.6; }
 
     /* Header styling */
     .main-header {
         background: linear-gradient(90deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        font-size: 56px;
+        font-size: clamp(2rem, 6vw, 3.5rem);
         font-weight: 800;
         margin-bottom: 8px;
         text-align: center;
     }
 
-    .main-subtitle {
-        color: #8892b0;
-        font-size: 18px;
-        margin-bottom: 48px;
-        text-align: center;
-    }
+    .main-subtitle { color: #8892b0; font-size: clamp(0.875rem, 2vw, 1.125rem); margin-bottom: 48px; text-align: center; }
 
     /* Live indicator */
-    .live-indicator {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        color: #64ffda;
-        font-size: 12px;
-        text-transform: uppercase;
-        letter-spacing: 1px;
+    .live-indicator { display: inline-flex; align-items: center; gap: 8px; color: #64ffda; font-size: clamp(0.65rem, 1.5vw, 0.75rem); text-transform: uppercase; letter-spacing: 1px; }
+    .live-dot { width: 8px; height: 8px; background: #64ffda; border-radius: 50%; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.2); } }
+
+    /* Tablet breakpoint */
+    @media (max-width: 992px) {
+        .block-container {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
+        .dashboard-card { padding: 24px; }
     }
 
-    .live-dot {
-        width: 8px;
-        height: 8px;
-        background: #64ffda;
-        border-radius: 50%;
-        animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-        0%, 100% { opacity: 1; transform: scale(1); }
-        50% { opacity: 0.5; transform: scale(1.2); }
+    /* Mobile breakpoint */
+    @media (max-width: 640px) {
+        .block-container {
+            padding-left: 0.5rem !important;
+            padding-right: 0.5rem !important;
+        }
+        .dashboard-card {
+            padding: 16px;
+            border-radius: 12px;
+        }
     }
 </style>
 """, unsafe_allow_html=True)
