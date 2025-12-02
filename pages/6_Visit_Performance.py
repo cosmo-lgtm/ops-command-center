@@ -686,7 +686,7 @@ def render_metric_card(value, label, sublabel=None, status="neutral"):
     """
 
 
-def render_leaderboard_entry(rank, name, visits, conversion_rate, units, show_badges=True):
+def render_leaderboard_entry(rank, name, visits, conversion_rate, units, visits_converted=0, show_badges=True):
     import html
     rank_class = {1: "leaderboard-rank-gold", 2: "leaderboard-rank-silver", 3: "leaderboard-rank-bronze"}.get(rank, "")
     safe_name = html.escape(str(name)) if name else "Unknown"
@@ -696,8 +696,9 @@ def render_leaderboard_entry(rank, name, visits, conversion_rate, units, show_ba
             badges_html += '<span class="attribution-badge">HIGH CONVERTER</span>'
         if units >= 500:
             badges_html += '<span class="pod-badge">TOP SELLER</span>'
-    stats_text = f"{int(visits)} visits &bull; {conversion_rate:.0f}% converted &bull; {units:,.0f} units attributed"
-    return f'<div class="leaderboard-card"><span class="leaderboard-rank {rank_class}">#{rank}</span> <span class="leaderboard-name">{safe_name}</span>{badges_html}<div class="leaderboard-stats">{stats_text}</div></div>'
+    stats_text = f"{int(visits)} visits"
+    attr_text = f'<span style="color: #6b7280; font-size: 0.7rem;"> ({int(visits_converted)} measurable → {conversion_rate:.0f}% converted, {units:,.0f} units)</span>'
+    return f'<div class="leaderboard-card"><span class="leaderboard-rank {rank_class}">#{rank}</span> <span class="leaderboard-name">{safe_name}</span>{badges_html}<div class="leaderboard-stats">{stats_text}{attr_text}</div></div>'
 
 
 # =============================================================================
@@ -865,19 +866,7 @@ def main():
 
     # Row 2: Rep Leaderboard (Top 5 left, Bottom 5 right)
     st.markdown('<p class="section-header">Rep Leaderboard</p>', unsafe_allow_html=True)
-
-    # Measurable visits KPI
-    measurable_visits = attribution['measurable_visits'] if 'measurable_visits' in attribution and pd.notna(attribution['measurable_visits']) else 0
-    st.markdown(f"""
-    <div style="background: rgba(30, 41, 59, 0.5); border: 1px solid rgba(71, 85, 105, 0.5); border-radius: 8px; padding: 12px 16px; margin-bottom: 16px;">
-        <span style="font-size: 1.5rem; font-weight: 700; color: #f59e0b;">{int(measurable_visits):,}</span>
-        <span style="font-size: 0.9rem; color: #9ca3af; margin-left: 8px;">Measurable Visits</span>
-        <span style="font-size: 0.75rem; color: #6b7280; margin-left: 8px;">(14+ days old)</span>
-    </div>
-    <p style="font-size: 0.75rem; color: #6b7280; margin-top: -8px; margin-bottom: 12px;">
-        ⚠️ Conversion % and units attributed are based only on visits 14+ days old (to allow time for sales attribution)
-    </p>
-    """, unsafe_allow_html=True)
+    st.markdown('<p style="font-size: 0.75rem; color: #6b7280; margin-top: -8px; margin-bottom: 12px;">Conversion % and units are based on visits 14+ days old (measurable)</p>', unsafe_allow_html=True)
     if not rep_performance.empty:
         col1, col2 = st.columns(2)
         total_reps = len(rep_performance)
@@ -893,7 +882,8 @@ def main():
                     name=row['rep_name'],
                     visits=row['total_visits'],
                     conversion_rate=row['conversion_rate'] if pd.notna(row['conversion_rate']) else 0,
-                    units=row['total_attributed_units'] if pd.notna(row['total_attributed_units']) else 0
+                    units=row['total_attributed_units'] if pd.notna(row['total_attributed_units']) else 0,
+                    visits_converted=row['visits_converted'] if pd.notna(row['visits_converted']) else 0
                 ), unsafe_allow_html=True)
 
         # Bottom 5 on the right
@@ -906,7 +896,8 @@ def main():
                         name=row['rep_name'],
                         visits=row['total_visits'],
                         conversion_rate=row['conversion_rate'] if pd.notna(row['conversion_rate']) else 0,
-                        units=row['total_attributed_units'] if pd.notna(row['total_attributed_units']) else 0
+                        units=row['total_attributed_units'] if pd.notna(row['total_attributed_units']) else 0,
+                        visits_converted=row['visits_converted'] if pd.notna(row['visits_converted']) else 0
                     ), unsafe_allow_html=True)
     else:
         st.info("No rep data available")
