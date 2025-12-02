@@ -673,7 +673,7 @@ def render_metric_card(value, label, sublabel=None, status="neutral"):
     """
 
 
-def render_leaderboard_entry(rank, name, visits, conversion_rate, units, weekly_data=None, show_badges=True):
+def render_leaderboard_entry(rank, name, visits, conversion_rate, units, show_badges=True):
     import html
     rank_class = {1: "leaderboard-rank-gold", 2: "leaderboard-rank-silver", 3: "leaderboard-rank-bronze"}.get(rank, "")
     safe_name = html.escape(str(name)) if name else "Unknown"
@@ -684,18 +684,7 @@ def render_leaderboard_entry(rank, name, visits, conversion_rate, units, weekly_
         if units >= 500:
             badges_html += '<span class="pod-badge">TOP SELLER</span>'
     stats_text = f"{int(visits)} visits &bull; {conversion_rate:.0f}% converted &bull; {units:,.0f} units attributed"
-
-    # Mini bar chart for weekly visits
-    bars_html = ""
-    if weekly_data is not None and len(weekly_data) > 0:
-        max_visits = max(weekly_data) if max(weekly_data) > 0 else 1
-        bars = []
-        for v in weekly_data:
-            height = int((v / max_visits) * 20) if max_visits > 0 else 0
-            bars.append(f'<div style="width:8px;height:{height}px;background:#f59e0b;margin-right:2px;border-radius:2px;"></div>')
-        bars_html = f'<div style="display:flex;align-items:flex-end;height:20px;margin-top:4px;">{"".join(bars)}</div>'
-
-    return f'<div class="leaderboard-card"><span class="leaderboard-rank {rank_class}">#{rank}</span> <span class="leaderboard-name">{safe_name}</span>{badges_html}<div class="leaderboard-stats">{stats_text}</div>{bars_html}</div>'
+    return f'<div class="leaderboard-card"><span class="leaderboard-rank {rank_class}">#{rank}</span> <span class="leaderboard-name">{safe_name}</span>{badges_html}<div class="leaderboard-stats">{stats_text}</div></div>'
 
 
 # =============================================================================
@@ -770,14 +759,6 @@ def main():
         attribution = load_visit_attribution(days_back, attribution_window, selected_rep)
         rep_performance = load_rep_performance(days_back, attribution_window)
         weekly_trend = load_weekly_trend(12)
-        rep_weekly = load_rep_weekly_visits()
-
-        # Build dict of weekly visits per rep for sparklines
-        rep_weekly_dict = {}
-        if not rep_weekly.empty:
-            for rep_name in rep_weekly['rep_name'].unique():
-                rep_data = rep_weekly[rep_weekly['rep_name'] == rep_name].sort_values('week_start')
-                rep_weekly_dict[rep_name] = rep_data['visits'].tolist()
 
         # Filter rep_performance if a specific rep is selected
         if selected_rep and selected_rep != "All Reps":
@@ -881,14 +862,12 @@ def main():
         with col1:
             st.markdown('<p style="font-size: 0.9rem; color: #6b7280; margin-bottom: 0.5rem;">Top 5</p>', unsafe_allow_html=True)
             for rank, (idx, row) in enumerate(top_5.iterrows(), start=1):
-                weekly_data = rep_weekly_dict.get(row['rep_name'], [])
                 st.markdown(render_leaderboard_entry(
                     rank=rank,
                     name=row['rep_name'],
                     visits=row['total_visits'],
                     conversion_rate=row['conversion_rate'] if pd.notna(row['conversion_rate']) else 0,
-                    units=row['total_attributed_units'] if pd.notna(row['total_attributed_units']) else 0,
-                    weekly_data=weekly_data
+                    units=row['total_attributed_units'] if pd.notna(row['total_attributed_units']) else 0
                 ), unsafe_allow_html=True)
 
         # Bottom 5 on the right
@@ -896,14 +875,12 @@ def main():
             if not bottom_5.empty:
                 st.markdown('<p style="font-size: 0.9rem; color: #6b7280; margin-bottom: 0.5rem;">Bottom 5</p>', unsafe_allow_html=True)
                 for rank, (idx, row) in enumerate(bottom_5.iterrows(), start=total_reps - 4):
-                    weekly_data = rep_weekly_dict.get(row['rep_name'], [])
                     st.markdown(render_leaderboard_entry(
                         rank=rank,
                         name=row['rep_name'],
                         visits=row['total_visits'],
                         conversion_rate=row['conversion_rate'] if pd.notna(row['conversion_rate']) else 0,
-                        units=row['total_attributed_units'] if pd.notna(row['total_attributed_units']) else 0,
-                        weekly_data=weekly_data
+                        units=row['total_attributed_units'] if pd.notna(row['total_attributed_units']) else 0
                     ), unsafe_allow_html=True)
     else:
         st.info("No rep data available")
