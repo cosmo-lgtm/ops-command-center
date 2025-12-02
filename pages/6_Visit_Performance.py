@@ -131,47 +131,6 @@ st.markdown("""
             gap: 12px;
         }
     }
-
-    /* Dataframe/Table styling to match Nowadays brand */
-    .stDataFrame {
-        background: transparent !important;
-    }
-    .stDataFrame > div {
-        background: transparent !important;
-    }
-    .stDataFrame [data-testid="stDataFrameResizable"] {
-        background: #2d2926 !important;
-        border-radius: 12px;
-        border: 1px solid rgba(241, 239, 232, 0.1) !important;
-    }
-    /* Table header */
-    .stDataFrame thead tr th {
-        background: #3a3633 !important;
-        color: #f1efe8 !important;
-        border-bottom: 1px solid rgba(241, 239, 232, 0.2) !important;
-    }
-    /* Table rows */
-    .stDataFrame tbody tr td {
-        background: #2d2926 !important;
-        color: #d7d2cb !important;
-        border-bottom: 1px solid rgba(241, 239, 232, 0.05) !important;
-    }
-    /* Hover state */
-    .stDataFrame tbody tr:hover td {
-        background: #3a3633 !important;
-    }
-    /* Scrollbar styling */
-    .stDataFrame ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-    }
-    .stDataFrame ::-webkit-scrollbar-track {
-        background: #1a1715;
-    }
-    .stDataFrame ::-webkit-scrollbar-thumb {
-        background: #98938f;
-        border-radius: 4px;
-    }
 </style>
 """, unsafe_allow_html=True)
 
