@@ -36,7 +36,12 @@ st.markdown("""
     }
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    header {visibility: hidden;}
+    header {visibility: hidden; height: 0px !important;}
+    .stApp > header {display: none !important;}
+    .stDeployButton {display: none !important;}
+    [data-testid="stHeader"] {display: none !important;}
+    [data-testid="stToolbar"] {display: none !important;}
+    .block-container {padding-top: 1rem !important;}
 
     .metric-card {
         background: rgba(255, 255, 255, 0.03);
