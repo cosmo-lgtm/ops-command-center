@@ -10,7 +10,7 @@ st.set_page_config(
     page_title="Ops Command Center",
     page_icon="🎛️",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="auto"
 )
 
 # Dark mode custom CSS
