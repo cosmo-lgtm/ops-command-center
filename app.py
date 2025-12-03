@@ -209,6 +209,18 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
+        st.markdown("""
+        <div class="dashboard-card">
+            <div class="card-icon">📈</div>
+            <div class="card-title">Market Intelligence</div>
+            <div class="card-description">
+                CT cannabis market trends, THC beverage competitive landscape, seasonality analysis.
+                <br><br>
+                <strong>Key Metrics:</strong> Weekly Sales $5.5M, Avg Price $32, Market Share
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
     # Navigation hint
     st.markdown("""
     <div style="text-align: center; margin-top: 48px; color: #8892b0;">
