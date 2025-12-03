@@ -230,6 +230,10 @@ def load_inventory_data(lookback_days: int = 90):
             AND sfo.order_status != 'Draft'
             AND sfo.order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
             AND sfo.order_date <= CURRENT_DATE()
+            AND (sfo.pricebook_name IS NULL OR (
+                LOWER(sfo.pricebook_name) NOT LIKE '%sample%'
+                AND LOWER(sfo.pricebook_name) NOT LIKE '%suggested%'
+            ))
         GROUP BY account_id, customer_name
     ),
 
@@ -476,6 +480,10 @@ def load_trend_data(lookback_weeks: int = 12):
             AND order_status != 'Draft'
             AND order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_weeks} WEEK)
             AND order_date <= CURRENT_DATE()
+            AND (pricebook_name IS NULL OR (
+                LOWER(pricebook_name) NOT LIKE '%sample%'
+                AND LOWER(pricebook_name) NOT LIKE '%suggested%'
+            ))
         GROUP BY week_start
     ),
 
