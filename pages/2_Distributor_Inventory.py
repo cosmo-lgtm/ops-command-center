@@ -221,6 +221,7 @@ def load_inventory_data(lookback_days: int = 90):
         SELECT
             sfo.account_id,
             sfo.customer_name as distributor_name,
+            sfo.account_type,
             SUM(CAST(sfo.quantity AS INT64)) as qty_ordered,
             SUM(CAST(sfo.line_total_price AS FLOAT64)) as order_value,
             COUNT(DISTINCT sfo.order_id) as order_count,
@@ -233,7 +234,7 @@ def load_inventory_data(lookback_days: int = 90):
                 LOWER(sfo.pricebook_name) NOT LIKE '%sample%'
                 AND LOWER(sfo.pricebook_name) NOT LIKE '%suggested%'
             ))
-        GROUP BY account_id, customer_name
+        GROUP BY account_id, customer_name, account_type
     ),
 
     -- VIP depletion by distributor (last N days)
@@ -456,6 +457,34 @@ def load_state_depletion_data(lookback_days: int = 90):
     FROM state_depletion
     GROUP BY state
     ORDER BY total_depleted DESC
+    """
+    return client.query(query).to_dataframe()
+
+
+@st.cache_data(ttl=300)
+def load_channel_breakdown(lookback_days: int = 90):
+    """Load order totals broken down by Distributor vs D2R (Direct to Retail)."""
+    client = get_bq_client()
+
+    query = f"""
+    SELECT
+        CASE
+            WHEN account_type IN ('Distributor', 'Distribution Center') THEN 'Distributor'
+            ELSE 'D2R'
+        END as channel,
+        COUNT(DISTINCT account_id) as account_count,
+        COUNT(DISTINCT order_id) as order_count,
+        SUM(CAST(line_total_price AS FLOAT64)) as order_value,
+        SUM(CAST(quantity AS INT64)) as units
+    FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened`
+    WHERE order_status != 'Draft'
+        AND order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
+        AND order_date <= CURRENT_DATE()
+        AND (pricebook_name IS NULL OR (
+            LOWER(pricebook_name) NOT LIKE '%sample%'
+            AND LOWER(pricebook_name) NOT LIKE '%suggested%'
+        ))
+    GROUP BY channel
     """
     return client.query(query).to_dataframe()
 
@@ -708,6 +737,7 @@ def main():
     try:
         distributors_df = load_distributors()
         inventory_df = load_inventory_data(lookback_days=lookback_days)
+        channel_df = load_channel_breakdown(lookback_days=lookback_days)
         # Trend data: convert days to weeks, minimum 12 for forecasting (loaded separately)
         lookback_weeks = lookback_days // 7
         trend_df = load_trend_data(lookback_weeks=lookback_weeks)
@@ -739,6 +769,15 @@ def main():
     total_qty_ordered = filtered_df['total_qty_ordered'].sum()
     total_qty_depleted = filtered_df['total_qty_depleted'].sum()
 
+    # Get channel breakdown (Distributor vs D2R)
+    distro_row = channel_df[channel_df['channel'] == 'Distributor'].iloc[0] if len(channel_df[channel_df['channel'] == 'Distributor']) > 0 else None
+    d2r_row = channel_df[channel_df['channel'] == 'D2R'].iloc[0] if len(channel_df[channel_df['channel'] == 'D2R']) > 0 else None
+
+    distro_accounts = int(distro_row['account_count']) if distro_row is not None else 0
+    distro_value = float(distro_row['order_value']) if distro_row is not None else 0
+    d2r_accounts = int(d2r_row['account_count']) if d2r_row is not None else 0
+    d2r_value = float(d2r_row['order_value']) if d2r_row is not None else 0
+
     # Separate distributors with and without depletion data
     has_depletion_df = filtered_df[
         (filtered_df['total_qty_depleted'].notna()) &
@@ -761,16 +800,22 @@ def main():
     col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
-        st.markdown(render_metric_card(
-            f"{total_distributors:,}",
-            "Active Distributors"
-        ), unsafe_allow_html=True)
+        st.markdown(f'''
+        <div class="metric-card">
+            <p class="metric-value">{distro_accounts:,}</p>
+            <p class="metric-label">Distributors</p>
+            <p class="metric-sublabel">{d2r_accounts:,} D2R Accounts</p>
+        </div>
+        ''', unsafe_allow_html=True)
 
     with col2:
-        st.markdown(render_metric_card(
-            f"${total_order_value/1000000:.1f}M",
-            f"Order Value ({lookback_days}d)"
-        ), unsafe_allow_html=True)
+        st.markdown(f'''
+        <div class="metric-card">
+            <p class="metric-value">${distro_value/1000000:.1f}M</p>
+            <p class="metric-label">Distro Revenue ({lookback_days}d)</p>
+            <p class="metric-sublabel">${d2r_value/1000000:.1f}M D2R</p>
+        </div>
+        ''', unsafe_allow_html=True)
 
     with col3:
         # Percentage based on distributors WITH depletion data (those we can classify)
