@@ -226,8 +226,7 @@ def load_inventory_data(lookback_days: int = 90):
             COUNT(DISTINCT sfo.order_id) as order_count,
             MAX(sfo.order_date) as last_order_date
         FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
-        WHERE sfo.account_type = 'Distributor'
-            AND sfo.order_status != 'Draft'
+        WHERE sfo.order_status != 'Draft'
             AND sfo.order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
             AND sfo.order_date <= CURRENT_DATE()
             AND (sfo.pricebook_name IS NULL OR (
@@ -476,8 +475,7 @@ def load_trend_data(lookback_weeks: int = 12):
             SUM(CAST(line_total_price AS FLOAT64)) as order_value,
             COUNT(DISTINCT order_id) as order_count
         FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened`
-        WHERE account_type = 'Distributor'
-            AND order_status != 'Draft'
+        WHERE order_status != 'Draft'
             AND order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_weeks} WEEK)
             AND order_date <= CURRENT_DATE()
             AND (pricebook_name IS NULL OR (
