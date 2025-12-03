@@ -266,9 +266,8 @@ def load_visit_attribution(days_back=30, attribution_window=30, rep_name=None, _
     account_vip_map AS (
         SELECT DISTINCT
             sfdc_account_id,
-            vip_id,
             vip_account_code,
-            distributor_code
+            primary_distributor_code as distributor_code
         FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_v2`
         WHERE sfdc_account_id IS NOT NULL
     ),
@@ -378,9 +377,8 @@ def load_rep_performance(days_back=30, attribution_window=30, _cache_version=CAC
     account_vip_map AS (
         SELECT DISTINCT
             sfdc_account_id,
-            vip_id,
             vip_account_code,
-            distributor_code
+            primary_distributor_code as distributor_code
         FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_v2`
         WHERE sfdc_account_id IS NOT NULL
     ),
@@ -529,9 +527,8 @@ def load_pod_growth(days_back=60, attribution_window=30, _cache_version=CACHE_VE
     account_vip_map AS (
         SELECT DISTINCT
             sfdc_account_id,
-            vip_id,
             vip_account_code,
-            distributor_code
+            primary_distributor_code as distributor_code
         FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_v2`
         WHERE sfdc_account_id IS NOT NULL
     ),
@@ -620,9 +617,8 @@ def load_weekly_trend(weeks_back=12, _cache_version=CACHE_VERSION):
     account_vip_map AS (
         SELECT DISTINCT
             sfdc_account_id,
-            vip_id,
             vip_account_code,
-            distributor_code
+            primary_distributor_code as distributor_code
         FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_v2`
         WHERE sfdc_account_id IS NOT NULL
     ),
