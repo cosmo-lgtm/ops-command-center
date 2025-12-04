@@ -157,7 +157,7 @@ def load_weekly_comparison():
             AVG(CAST(total_price AS FLOAT64)) as aov
         FROM `artful-logic-475116-p1.raw_shopify.orders`
         WHERE cancelled_at IS NULL AND financial_status IN ('paid', 'partially_refunded')
-            AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 12 WEEK)
+            AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 84 DAY)
         GROUP BY week_start
     )
     SELECT *, LAG(revenue) OVER (ORDER BY week_start) as prev_week_revenue,
