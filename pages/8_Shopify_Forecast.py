@@ -79,17 +79,16 @@ COLORS = {
 }
 
 def apply_dark_theme(fig, height=350, **kwargs):
-    layout_args = {
-        'paper_bgcolor': 'rgba(0,0,0,0)', 'plot_bgcolor': 'rgba(0,0,0,0)',
-        'font': {'color': '#ccd6f6'}, 'height': height,
-        'margin': kwargs.get('margin', dict(l=0, r=0, t=20, b=0)),
-        'xaxis': {'gridcolor': 'rgba(255,255,255,0.1)', 'tickfont': {'color': '#8892b0'}, **kwargs.get('xaxis', {})},
-        'yaxis': {'gridcolor': 'rgba(255,255,255,0.1)', 'tickfont': {'color': '#8892b0'}, **kwargs.get('yaxis', {})}
-    }
-    for k, v in kwargs.items():
-        if k not in ['xaxis', 'yaxis', 'margin']:
-            layout_args[k] = v
-    fig.update_layout(**layout_args)
+    xaxis_defaults = {'gridcolor': 'rgba(255,255,255,0.1)', 'tickfont': {'color': '#8892b0'}}
+    yaxis_defaults = {'gridcolor': 'rgba(255,255,255,0.1)', 'tickfont': {'color': '#8892b0'}}
+    xaxis_defaults.update(kwargs.pop('xaxis', {}))
+    yaxis_defaults.update(kwargs.pop('yaxis', {}))
+    margin = kwargs.pop('margin', dict(l=0, r=0, t=20, b=0))
+    fig.update_layout(
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+        font={'color': '#ccd6f6'}, height=height, margin=margin,
+        xaxis=xaxis_defaults, yaxis=yaxis_defaults, **kwargs
+    )
     return fig
 
 @st.cache_resource
