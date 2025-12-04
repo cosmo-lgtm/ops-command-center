@@ -291,7 +291,7 @@ if not forecast_df.empty:
     fig.add_trace(go.Scatter(x=forecast_df['order_date'], y=forecast_df['forecast_revenue'], mode='lines', name='Forecast',
         line=dict(color=COLORS['warning'], width=2, dash='dash'), fill='tozeroy', fillcolor='rgba(255, 214, 102, 0.1)'))
 apply_dark_theme(fig, height=400, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#8892b0')),
-    hovermode='x unified', yaxis={'title': 'Revenue ($)', 'titlefont': {'color': '#8892b0'}})
+    hovermode='x unified', yaxis={'title': {'text': 'Revenue ($)', 'font': {'color': '#8892b0'}}})
 st.plotly_chart(fig, use_container_width=True)
 
 if not forecast_df.empty:
