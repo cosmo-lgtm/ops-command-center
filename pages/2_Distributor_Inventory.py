@@ -513,6 +513,195 @@ def load_trend_data(lookback_weeks: int = 12):
     return client.query(query).to_dataframe()
 
 
+@st.cache_data(ttl=300)
+def load_distributor_weekly_trends(lookback_weeks: int = 12):
+    """Load weekly depletion trends per distributor for granular forecasting."""
+    client = get_bq_client()
+
+    query = f"""
+    WITH weekly_by_dist AS (
+        SELECT
+            d.distributor_code,
+            d.distributor_name,
+            DATE_TRUNC(sc.transaction_date, WEEK) as week_start,
+            SUM(sc.quantity) as qty_depleted,
+            COUNT(DISTINCT sc.account_code) as stores_reached,
+            COUNT(DISTINCT sc.product_code) as skus_sold
+        FROM `artful-logic-475116-p1.analytics.vip_sales_clean` sc
+        JOIN `artful-logic-475116-p1.staging_vip.distributor_fact_sheet_v2` d
+            ON sc.distributor_code = d.distributor_code
+        WHERE sc.transaction_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_weeks} WEEK)
+        GROUP BY d.distributor_code, d.distributor_name, week_start
+    )
+    SELECT
+        distributor_code,
+        distributor_name,
+        week_start,
+        qty_depleted,
+        stores_reached,
+        skus_sold,
+        AVG(qty_depleted) OVER (
+            PARTITION BY distributor_code
+            ORDER BY week_start
+            ROWS BETWEEN 3 PRECEDING AND CURRENT ROW
+        ) as ma_4wk,
+        LAG(qty_depleted, 4) OVER (
+            PARTITION BY distributor_code ORDER BY week_start
+        ) as qty_4wk_ago
+    FROM weekly_by_dist
+    ORDER BY distributor_code, week_start
+    """
+    return client.query(query).to_dataframe()
+
+
+def calculate_stockout_risk(inventory_df: pd.DataFrame, dist_trends_df: pd.DataFrame):
+    """
+    Calculate stockout risk for each distributor based on:
+    - Current weeks of inventory
+    - Depletion velocity trend (accelerating/decelerating)
+    - Velocity consistency (coefficient of variation)
+
+    Returns dataframe with stockout predictions and risk scores.
+    """
+    if inventory_df.empty:
+        return pd.DataFrame()
+
+    results = []
+    today = datetime.now().date()
+
+    for _, row in inventory_df.iterrows():
+        dist_code = row.get('distributor_code') or row.get('vip_codes', '').split(',')[0].strip()
+        dist_name = row['distributor_name']
+        weeks_inv = row.get('weeks_of_inventory')
+        weekly_rate = row.get('weekly_depletion_rate', 0) or 0
+        qty_ordered = row.get('total_qty_ordered', 0) or 0
+        qty_depleted = row.get('total_qty_depleted', 0) or 0
+
+        # Get distributor-specific trend data
+        dist_data = dist_trends_df[dist_trends_df['distributor_code'] == dist_code] if not dist_trends_df.empty else pd.DataFrame()
+
+        # Calculate velocity trend
+        velocity_trend = 0
+        velocity_cv = 0.2  # default coefficient of variation
+
+        if len(dist_data) >= 4:
+            recent_4wk = dist_data.tail(4)['qty_depleted'].mean()
+            prev_4wk = dist_data.head(4)['qty_depleted'].mean() if len(dist_data) >= 8 else recent_4wk
+            if prev_4wk > 0:
+                velocity_trend = (recent_4wk - prev_4wk) / prev_4wk
+
+            # Velocity consistency
+            if dist_data['qty_depleted'].mean() > 0:
+                velocity_cv = dist_data['qty_depleted'].std() / dist_data['qty_depleted'].mean()
+
+        # Adjusted weekly rate based on trend
+        trend_factor = 1 + (velocity_trend * 0.5)  # Dampen trend impact
+        adjusted_weekly_rate = weekly_rate * trend_factor if weekly_rate > 0 else 0
+
+        # Stockout prediction
+        if adjusted_weekly_rate > 0 and qty_ordered > 0:
+            weeks_until_stockout = qty_ordered / adjusted_weekly_rate
+            stockout_date = today + timedelta(weeks=weeks_until_stockout)
+        elif weeks_inv and weeks_inv > 0:
+            weeks_until_stockout = weeks_inv
+            stockout_date = today + timedelta(weeks=weeks_inv)
+        else:
+            weeks_until_stockout = None
+            stockout_date = None
+
+        # Risk score (0-100)
+        # Higher risk = lower weeks, accelerating velocity, inconsistent velocity
+        if weeks_until_stockout is not None:
+            base_risk = max(0, min(100, 100 - (weeks_until_stockout * 8)))  # 0 weeks = 100, 12+ weeks = 0
+            trend_modifier = 1 + max(0, velocity_trend * 0.3)  # Accelerating = higher risk
+            consistency_modifier = 1 + min(0.3, velocity_cv * 0.5)  # Inconsistent = higher risk
+            risk_score = min(100, base_risk * trend_modifier * consistency_modifier)
+        else:
+            risk_score = 50 if qty_depleted > 0 else 0  # Unknown = medium risk if active
+
+        # Reorder recommendation
+        target_weeks = 8  # Target 8 weeks of inventory
+        if adjusted_weekly_rate > 0:
+            target_qty = adjusted_weekly_rate * target_weeks
+            current_equiv_qty = qty_ordered
+            reorder_qty = max(0, target_qty - current_equiv_qty)
+
+            # Urgency based on weeks until stockout
+            if weeks_until_stockout is not None and weeks_until_stockout < 3:
+                urgency = 'CRITICAL'
+            elif weeks_until_stockout is not None and weeks_until_stockout < 6:
+                urgency = 'HIGH'
+            elif weeks_until_stockout is not None and weeks_until_stockout < 10:
+                urgency = 'MEDIUM'
+            else:
+                urgency = 'LOW'
+        else:
+            reorder_qty = 0
+            urgency = 'N/A'
+
+        results.append({
+            'distributor_code': dist_code,
+            'distributor_name': dist_name,
+            'current_inventory_weeks': weeks_inv,
+            'weekly_depletion_rate': weekly_rate,
+            'adjusted_weekly_rate': adjusted_weekly_rate,
+            'velocity_trend_pct': velocity_trend * 100,
+            'velocity_cv': velocity_cv,
+            'weeks_until_stockout': weeks_until_stockout,
+            'predicted_stockout_date': stockout_date,
+            'risk_score': risk_score,
+            'reorder_qty_suggested': reorder_qty,
+            'reorder_urgency': urgency,
+            'qty_ordered_period': qty_ordered,
+            'qty_depleted_period': qty_depleted
+        })
+
+    return pd.DataFrame(results)
+
+
+def generate_pipeline_forecast(stockout_df: pd.DataFrame, forecast_weeks: int = 12):
+    """
+    Generate pipeline-ready forecast data for integration with external systems.
+    Returns weekly projections per distributor.
+    """
+    if stockout_df.empty:
+        return pd.DataFrame()
+
+    today = datetime.now().date()
+    future_weeks = [today + timedelta(weeks=i) for i in range(1, forecast_weeks + 1)]
+
+    pipeline_rows = []
+
+    for _, row in stockout_df.iterrows():
+        dist_code = row['distributor_code']
+        dist_name = row['distributor_name']
+        weekly_rate = row.get('adjusted_weekly_rate', 0) or 0
+        current_inv = row.get('qty_ordered_period', 0) or 0
+
+        running_inventory = current_inv
+
+        for i, week_date in enumerate(future_weeks):
+            # Simple projection: current inventory minus cumulative depletion
+            projected_depletion = weekly_rate
+            running_inventory = max(0, running_inventory - projected_depletion)
+
+            # Stockout flag
+            is_stockout = running_inventory <= 0
+
+            pipeline_rows.append({
+                'distributor_code': dist_code,
+                'distributor_name': dist_name,
+                'forecast_week': week_date,
+                'week_number': i + 1,
+                'projected_depletion': projected_depletion,
+                'projected_inventory': running_inventory,
+                'is_stockout': is_stockout,
+                'weekly_depletion_rate': weekly_rate
+            })
+
+    return pd.DataFrame(pipeline_rows)
+
+
 def _forecast_single_series(y: np.ndarray, forecast_weeks: int = 12):
     """
     Generate forecast for a single time series using damped trend approach.
@@ -715,6 +904,8 @@ def main():
         trend_df = load_trend_data(lookback_weeks=lookback_weeks)
         # Always load 12 weeks for forecast model regardless of display lookback
         forecast_trend_df = load_trend_data(lookback_weeks=12) if lookback_weeks < 12 else trend_df
+        # Load distributor-level trends for stockout analysis
+        dist_trends_df = load_distributor_weekly_trends(lookback_weeks=12)
     except Exception as e:
         st.error(f"Error loading data: {e}")
         return
@@ -1151,6 +1342,171 @@ def main():
             st.info("Not enough historical data to generate forecast (need at least 4 weeks)")
     else:
         st.info("No trend data available for forecasting")
+
+    # ==================== STOCKOUT RISK & PIPELINE FORECAST ====================
+    st.markdown('<p class="section-header">🚨 Stockout Risk & Reorder Recommendations</p>', unsafe_allow_html=True)
+    st.markdown('<p style="color: #8892b0; font-size: 14px; margin-top: -10px;">Per-distributor stockout predictions with velocity-adjusted forecasting for pipeline planning</p>', unsafe_allow_html=True)
+
+    # Calculate stockout risk for filtered distributors
+    stockout_df = calculate_stockout_risk(filtered_df, dist_trends_df)
+
+    if not stockout_df.empty:
+        # KPI Row: Risk Summary
+        critical_count = len(stockout_df[stockout_df['reorder_urgency'] == 'CRITICAL'])
+        high_count = len(stockout_df[stockout_df['reorder_urgency'] == 'HIGH'])
+        medium_count = len(stockout_df[stockout_df['reorder_urgency'] == 'MEDIUM'])
+        avg_risk = stockout_df['risk_score'].mean()
+        total_reorder_qty = stockout_df['reorder_qty_suggested'].sum()
+
+        rcol1, rcol2, rcol3, rcol4, rcol5 = st.columns(5)
+        with rcol1:
+            st.markdown(render_metric_card(f"{critical_count}", "Critical Risk", "danger"), unsafe_allow_html=True)
+        with rcol2:
+            st.markdown(render_metric_card(f"{high_count}", "High Risk", "warning"), unsafe_allow_html=True)
+        with rcol3:
+            st.markdown(render_metric_card(f"{medium_count}", "Medium Risk", "primary"), unsafe_allow_html=True)
+        with rcol4:
+            st.markdown(render_metric_card(f"{avg_risk:.0f}", "Avg Risk Score", "primary"), unsafe_allow_html=True)
+        with rcol5:
+            st.markdown(render_metric_card(f"{total_reorder_qty:,.0f}", "Total Reorder Qty", "primary"), unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Two columns: Stockout Timeline + Risk Distribution
+        scol1, scol2 = st.columns(2)
+
+        with scol1:
+            st.markdown("**Predicted Stockout Timeline**")
+            # Filter to distributors with valid stockout dates
+            timeline_df = stockout_df[stockout_df['predicted_stockout_date'].notna()].copy()
+            timeline_df = timeline_df.sort_values('weeks_until_stockout').head(15)
+
+            if not timeline_df.empty:
+                # Color by urgency
+                urgency_colors = {
+                    'CRITICAL': COLORS['danger'],
+                    'HIGH': COLORS['warning'],
+                    'MEDIUM': COLORS['info'],
+                    'LOW': COLORS['success'],
+                    'N/A': '#8892b0'
+                }
+                bar_colors = [urgency_colors.get(u, '#8892b0') for u in timeline_df['reorder_urgency']]
+
+                fig = go.Figure(go.Bar(
+                    x=timeline_df['weeks_until_stockout'],
+                    y=timeline_df['distributor_name'],
+                    orientation='h',
+                    marker=dict(color=bar_colors),
+                    text=timeline_df.apply(lambda r: f"{r['weeks_until_stockout']:.1f} wks ({r['reorder_urgency']})", axis=1),
+                    textposition='outside',
+                    textfont=dict(color='#ccd6f6', size=10),
+                    hovertemplate='%{y}<br>Weeks to Stockout: %{x:.1f}<br>Stockout Date: %{customdata}<extra></extra>',
+                    customdata=timeline_df['predicted_stockout_date'].apply(lambda d: d.strftime('%b %d') if d else 'N/A')
+                ))
+                apply_dark_theme(fig, height=400, margin=dict(l=0, r=80, t=10, b=0), yaxis={'autorange': 'reversed'},
+                    xaxis={'title': 'Weeks Until Stockout'})
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No distributors with predictable stockout dates")
+
+        with scol2:
+            st.markdown("**Risk Score Distribution**")
+            # Scatter plot: Risk Score vs Weeks Until Stockout
+            scatter_df = stockout_df[stockout_df['weeks_until_stockout'].notna()].copy()
+
+            if not scatter_df.empty:
+                fig = go.Figure()
+
+                # Add scatter points colored by urgency
+                for urgency in ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']:
+                    urg_data = scatter_df[scatter_df['reorder_urgency'] == urgency]
+                    if not urg_data.empty:
+                        fig.add_trace(go.Scatter(
+                            x=urg_data['weeks_until_stockout'],
+                            y=urg_data['risk_score'],
+                            mode='markers',
+                            name=urgency,
+                            marker=dict(
+                                size=10,
+                                color={'CRITICAL': COLORS['danger'], 'HIGH': COLORS['warning'],
+                                       'MEDIUM': COLORS['info'], 'LOW': COLORS['success']}[urgency]
+                            ),
+                            text=urg_data['distributor_name'],
+                            hovertemplate='%{text}<br>Weeks: %{x:.1f}<br>Risk: %{y:.0f}<extra></extra>'
+                        ))
+
+                # Add danger zone shading
+                fig.add_hrect(y0=70, y1=100, fillcolor="rgba(255,107,107,0.1)", line_width=0)
+                fig.add_vrect(x0=0, x1=4, fillcolor="rgba(255,107,107,0.1)", line_width=0)
+
+                apply_dark_theme(fig, height=400,
+                    xaxis={'title': 'Weeks Until Stockout'},
+                    yaxis={'title': 'Risk Score (0-100)'},
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#8892b0')))
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No risk data available")
+
+        # Reorder Recommendations Table
+        st.markdown("**📋 Reorder Recommendations (Pipeline-Ready)**")
+
+        reorder_display = stockout_df[[
+            'distributor_name', 'reorder_urgency', 'weeks_until_stockout', 'predicted_stockout_date',
+            'reorder_qty_suggested', 'weekly_depletion_rate', 'velocity_trend_pct', 'risk_score'
+        ]].copy()
+
+        # Format columns
+        reorder_display['weeks_until_stockout'] = reorder_display['weeks_until_stockout'].apply(
+            lambda x: f"{x:.1f}" if pd.notna(x) else "N/A")
+        reorder_display['predicted_stockout_date'] = reorder_display['predicted_stockout_date'].apply(
+            lambda x: x.strftime('%Y-%m-%d') if pd.notna(x) else "N/A")
+        reorder_display['reorder_qty_suggested'] = reorder_display['reorder_qty_suggested'].apply(
+            lambda x: f"{x:,.0f}" if x > 0 else "-")
+        reorder_display['weekly_depletion_rate'] = reorder_display['weekly_depletion_rate'].apply(
+            lambda x: f"{x:,.0f}/wk" if pd.notna(x) and x > 0 else "-")
+        reorder_display['velocity_trend_pct'] = reorder_display['velocity_trend_pct'].apply(
+            lambda x: f"{x:+.1f}%" if pd.notna(x) else "-")
+        reorder_display['risk_score'] = reorder_display['risk_score'].apply(
+            lambda x: f"{x:.0f}" if pd.notna(x) else "-")
+
+        reorder_display.columns = ['Distributor', 'Urgency', 'Weeks to Stockout', 'Stockout Date',
+                                   'Suggested Reorder Qty', 'Weekly Velocity', 'Velocity Trend', 'Risk Score']
+
+        # Sort by urgency priority
+        urgency_order = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3, 'N/A': 4}
+        reorder_display['_sort'] = reorder_display['Urgency'].map(urgency_order)
+        reorder_display = reorder_display.sort_values('_sort').drop('_sort', axis=1)
+
+        st.dataframe(reorder_display, use_container_width=True, hide_index=True, height=350)
+
+        # Pipeline Export Section
+        with st.expander("📤 Pipeline Forecast Data (12-Week Projection)", expanded=False):
+            pipeline_df = generate_pipeline_forecast(stockout_df, forecast_weeks=12)
+            if not pipeline_df.empty:
+                # Summary by week
+                weekly_summary = pipeline_df.groupby('forecast_week').agg({
+                    'projected_depletion': 'sum',
+                    'is_stockout': 'sum'
+                }).reset_index()
+                weekly_summary.columns = ['Week', 'Total Projected Depletion', 'Distributors in Stockout']
+
+                st.markdown("**Weekly Aggregate Forecast**")
+                st.dataframe(weekly_summary, use_container_width=True, hide_index=True)
+
+                st.markdown("**Full Pipeline Data (for export)**")
+                # Show sample of full data
+                st.dataframe(pipeline_df.head(50), use_container_width=True, hide_index=True, height=300)
+
+                # Download button for full pipeline data
+                csv = pipeline_df.to_csv(index=False)
+                st.download_button(
+                    label="⬇️ Download Full Pipeline Forecast (CSV)",
+                    data=csv,
+                    file_name=f"pipeline_forecast_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+    else:
+        st.info("No stockout risk data available")
 
     # Charts Row 2: Top Overstocked + Top Understocked
     col1, col2 = st.columns(2)
