@@ -706,6 +706,53 @@ def load_this_week_visits():
     return client.query(query).to_dataframe().iloc[0]['visits_this_week']
 
 
+@st.cache_data(ttl=300)
+def load_avg_skus_per_door_by_owner(days_back=90, _cache_version=CACHE_VERSION):
+    """Load average unique SKUs per door by account owner.
+
+    Calculates for each owner:
+    - Total unique doors (retail accounts) they own with depletion
+    - Total unique SKUs sold across those doors
+    - Average SKUs per door
+    """
+    client = get_bq_client()
+    query = f"""
+    WITH owner_door_skus AS (
+        -- Get unique SKUs per door per owner from VIP sales
+        SELECT
+            a.OwnerId as owner_id,
+            r.sfdc_account_id,
+            COUNT(DISTINCT s.product_code) as unique_skus
+        FROM `artful-logic-475116-p1.analytics.vip_sales_clean` s
+        JOIN `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_v2` r
+            ON s.account_code = r.vip_account_code
+            AND s.distributor_code = r.primary_distributor_code
+        JOIN `artful-logic-475116-p1.raw_salesforce.Account` a
+            ON r.sfdc_account_id = a.Id
+        WHERE s.transaction_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {days_back} DAY)
+            AND r.sfdc_account_id IS NOT NULL
+            AND a.OwnerId IS NOT NULL
+        GROUP BY a.OwnerId, r.sfdc_account_id
+    ),
+    owner_stats AS (
+        SELECT
+            owner_id,
+            COUNT(DISTINCT sfdc_account_id) as doors_with_depletion,
+            SUM(unique_skus) as total_sku_instances,
+            AVG(unique_skus) as avg_skus_per_door
+        FROM owner_door_skus
+        GROUP BY owner_id
+    )
+    SELECT
+        u.Name as rep_name,
+        os.doors_with_depletion,
+        os.avg_skus_per_door
+    FROM owner_stats os
+    JOIN `artful-logic-475116-p1.raw_salesforce.User` u ON os.owner_id = u.Id
+    """
+    return client.query(query).to_dataframe()
+
+
 # =============================================================================
 # UI Components
 # =============================================================================
@@ -834,6 +881,18 @@ def main():
         attribution = load_visit_attribution(days_back, attribution_window, selected_rep)
         rep_performance = load_rep_performance(days_back, attribution_window)
         weekly_trend = load_weekly_trend(12)
+        avg_skus_by_owner = load_avg_skus_per_door_by_owner(days_back=90)
+
+        # Merge avg SKUs per door into rep_performance
+        if not avg_skus_by_owner.empty:
+            rep_performance = rep_performance.merge(
+                avg_skus_by_owner[['rep_name', 'avg_skus_per_door', 'doors_with_depletion']],
+                on='rep_name',
+                how='left'
+            )
+        else:
+            rep_performance['avg_skus_per_door'] = None
+            rep_performance['doors_with_depletion'] = None
 
         # Filter rep_performance if a specific rep is selected
         if selected_rep and selected_rep != "All Reps":
@@ -1011,17 +1070,28 @@ def main():
     if not rep_performance.empty:
         display_df = rep_performance.copy()
         # Columns: rep_name, total_visits, unique_accounts, visits_converted, conversion_rate,
-        #          new_pod_units, incremental_units, total_attributed_units, new_pods_count
-        display_df = display_df[['rep_name', 'total_visits', 'unique_accounts', 'visits_converted',
-                                  'conversion_rate', 'new_pod_units', 'incremental_units',
-                                  'total_attributed_units', 'new_pods_count']]
-        display_df.columns = ['Rep', 'Visits', 'Accounts', 'Converted', 'Conv %',
-                              'New POD Units', 'Incremental', 'Total Attributed', 'New PODs']
+        #          new_pod_units, incremental_units, total_attributed_units, new_pods_count, avg_skus_per_door
+        cols_to_display = ['rep_name', 'total_visits', 'unique_accounts', 'visits_converted',
+                           'conversion_rate', 'new_pod_units', 'incremental_units',
+                           'total_attributed_units', 'new_pods_count']
+        # Add avg_skus_per_door if available
+        if 'avg_skus_per_door' in display_df.columns:
+            cols_to_display.append('avg_skus_per_door')
+        display_df = display_df[cols_to_display]
+
+        col_names = ['Rep', 'Visits', 'Accounts', 'Converted', 'Conv %',
+                     'New POD Units', 'Incremental', 'Total Attributed', 'New PODs']
+        if 'avg_skus_per_door' in cols_to_display:
+            col_names.append('Avg SKUs/Door')
+        display_df.columns = col_names
+
         display_df['Conv %'] = display_df['Conv %'].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else "0%")
         display_df['New POD Units'] = display_df['New POD Units'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "0")
         display_df['Incremental'] = display_df['Incremental'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "0")
         display_df['Total Attributed'] = display_df['Total Attributed'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "0")
         display_df['New PODs'] = display_df['New PODs'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "0")
+        if 'Avg SKUs/Door' in display_df.columns:
+            display_df['Avg SKUs/Door'] = display_df['Avg SKUs/Door'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "-")
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
     # Footer
