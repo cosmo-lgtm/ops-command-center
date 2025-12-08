@@ -1819,28 +1819,37 @@ def main():
         woi_sku_df = load_woi_by_sku()
 
         if not woi_sku_df.empty:
-            # Summary metrics for SKU-level
-            woi_metric_cols = st.columns(4)
+            # Summary metrics for SKU-level (aggregated at parent distributor level)
+            woi_metric_cols = st.columns(5)
 
             with woi_metric_cols[0]:
-                sku_overstock = len(woi_sku_df[woi_sku_df['inventory_status'] == 'Overstock'])
+                parent_distros = woi_sku_df['distributor_name'].nunique()
                 st.markdown(f"""
                 <div class="metric-card">
-                    <p class="metric-value-warning">{sku_overstock}</p>
-                    <p class="metric-label">SKU × Distro Overstock</p>
+                    <p class="metric-value">{parent_distros}</p>
+                    <p class="metric-label">Parent Distributors</p>
                 </div>
                 """, unsafe_allow_html=True)
 
             with woi_metric_cols[1]:
-                sku_understock = len(woi_sku_df[woi_sku_df['inventory_status'] == 'Understock'])
+                sku_overstock = len(woi_sku_df[woi_sku_df['inventory_status'] == 'Overstock'])
                 st.markdown(f"""
                 <div class="metric-card">
-                    <p class="metric-value-danger">{sku_understock}</p>
-                    <p class="metric-label">SKU × Distro Understock</p>
+                    <p class="metric-value-warning">{sku_overstock}</p>
+                    <p class="metric-label">Overstock Combos</p>
                 </div>
                 """, unsafe_allow_html=True)
 
             with woi_metric_cols[2]:
+                sku_understock = len(woi_sku_df[woi_sku_df['inventory_status'] == 'Understock'])
+                st.markdown(f"""
+                <div class="metric-card">
+                    <p class="metric-value-danger">{sku_understock}</p>
+                    <p class="metric-label">Understock Combos</p>
+                </div>
+                """, unsafe_allow_html=True)
+
+            with woi_metric_cols[3]:
                 high_velocity = len(woi_sku_df[woi_sku_df['velocity_tier'] == 'High'])
                 st.markdown(f"""
                 <div class="metric-card">
@@ -1849,12 +1858,12 @@ def main():
                 </div>
                 """, unsafe_allow_html=True)
 
-            with woi_metric_cols[3]:
+            with woi_metric_cols[4]:
                 total_combos = len(woi_sku_df)
                 st.markdown(f"""
                 <div class="metric-card">
                     <p class="metric-value">{total_combos:,}</p>
-                    <p class="metric-label">Active SKU × Distro</p>
+                    <p class="metric-label">Total SKU × Distro</p>
                 </div>
                 """, unsafe_allow_html=True)
 
