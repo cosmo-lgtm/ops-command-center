@@ -1946,6 +1946,15 @@ def main():
                 top_distros = heatmap_df.groupby('distributor_name')['qty_depleted'].sum().nlargest(15).index.tolist()
                 pivot_df = pivot_df.loc[pivot_df.index.isin(top_distros)]
 
+                # Reorder columns by product family (Bottles, Seltzers, Shots)
+                column_order = [
+                    '2mg 750ml Bottle', '5mg 750ml Bottle', '10mg 750ml Bottle',
+                    '10mg 16oz Seltzer', '5mg 12oz Seltzer',
+                    '5mg 2oz Shot', '10mg 2oz Shot', '25mg 2oz Shot'
+                ]
+                ordered_cols = [c for c in column_order if c in pivot_df.columns]
+                pivot_df = pivot_df[ordered_cols]
+
                 if not pivot_df.empty:
                     fig = go.Figure(data=go.Heatmap(
                         z=pivot_df.values,
