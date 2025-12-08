@@ -50,13 +50,19 @@ def get_bq_client():
     )
     return bigquery.Client(credentials=credentials, project="artful-logic-475116-p1")
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=300)
 def run_query(query: str) -> pd.DataFrame:
     client = get_bq_client()
     return client.query(query).to_dataframe()
 
+# Sidebar - cache control
+with st.sidebar:
+    if st.button("🔄 Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
+
 # Data loading
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=300)
 def load_flow_data():
     return run_query("""
     SELECT *
@@ -64,7 +70,7 @@ def load_flow_data():
     ORDER BY order_value DESC
     """)
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=300)
 def load_replenishment_signals():
     return run_query("""
     SELECT *
@@ -72,7 +78,7 @@ def load_replenishment_signals():
     ORDER BY priority ASC, units_depleted_90d DESC
     """)
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=300)
 def load_weekly_trend():
     return run_query("""
     WITH weekly_orders AS (
@@ -112,7 +118,7 @@ def load_weekly_trend():
     ORDER BY week_start
     """)
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=300)
 def load_data_quality():
     return run_query("""
     SELECT
