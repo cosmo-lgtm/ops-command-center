@@ -215,17 +215,26 @@ def load_inventory_data(lookback_days: int = 90):
 
     query = f"""
     WITH
+    -- SKU mapping for case-to-unit conversion
+    sku_map AS (
+        SELECT sf_sku, pack_size
+        FROM `artful-logic-475116-p1.staging_vip.sku_mapping`
+    ),
+
     -- Salesforce orders to distributors (last N days)
     -- Excludes Draft orders
+    -- IMPORTANT: Multiply by pack_size to convert cases → units (VIP depletion is in units)
     sf_orders AS (
         SELECT
             sfo.account_id,
             sfo.customer_name as distributor_name,
-            SUM(CAST(sfo.quantity AS INT64)) as qty_ordered,
+            SUM(CAST(sfo.quantity AS INT64)) as qty_ordered_cases,
+            SUM(CAST(sfo.quantity AS INT64) * COALESCE(sm.pack_size, 1)) as qty_ordered,
             SUM(CAST(sfo.line_total_price AS FLOAT64)) as order_value,
             COUNT(DISTINCT sfo.order_id) as order_count,
             MAX(sfo.order_date) as last_order_date
         FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
+        LEFT JOIN sku_map sm ON sfo.sku = sm.sf_sku
         WHERE sfo.account_type IN ('Distributor', 'Distribution Center')
             AND sfo.order_status != 'Draft'
             AND sfo.order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
@@ -271,6 +280,7 @@ def load_inventory_data(lookback_days: int = 90):
         SELECT
             sfo.account_id,
             sfo.distributor_name,
+            sfo.qty_ordered_cases,
             sfo.qty_ordered,
             sfo.order_value,
             sfo.order_count,
@@ -287,7 +297,7 @@ def load_inventory_data(lookback_days: int = 90):
             OR sfo.account_id = vtf.sf_parent_id  -- Parent rollup
         LEFT JOIN vip_depletion vd
             ON vtf.distributor_code = vd.distributor_code
-        GROUP BY sfo.account_id, sfo.distributor_name, sfo.qty_ordered, sfo.order_value, sfo.order_count
+        GROUP BY sfo.account_id, sfo.distributor_name, sfo.qty_ordered_cases, sfo.qty_ordered, sfo.order_value, sfo.order_count
     ),
 
     -- VIP codes that are already matched to SF orders (via direct or parent)
@@ -304,6 +314,7 @@ def load_inventory_data(lookback_days: int = 90):
         SELECT
             vtf.distributor_code as account_id,
             vtf.vip_dist_name as distributor_name,
+            0 as qty_ordered_cases,
             0 as qty_ordered,
             0.0 as order_value,
             0 as order_count,
@@ -468,21 +479,30 @@ def load_trend_data(lookback_weeks: int = 12):
 
     query = f"""
     WITH
+    -- SKU mapping for case-to-unit conversion
+    sku_map AS (
+        SELECT sf_sku, pack_size
+        FROM `artful-logic-475116-p1.staging_vip.sku_mapping`
+    ),
+
     -- Weekly SF orders (excludes Draft orders)
+    -- IMPORTANT: Multiply by pack_size to convert cases → units
     weekly_orders AS (
         SELECT
-            DATE_TRUNC(order_date, WEEK) as week_start,
-            SUM(CAST(quantity AS INT64)) as qty_ordered,
-            SUM(CAST(line_total_price AS FLOAT64)) as order_value,
-            COUNT(DISTINCT order_id) as order_count
-        FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened`
-        WHERE account_type IN ('Distributor', 'Distribution Center')
-            AND order_status != 'Draft'
-            AND order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_weeks} WEEK)
-            AND order_date <= CURRENT_DATE()
-            AND (pricebook_name IS NULL OR (
-                LOWER(pricebook_name) NOT LIKE '%sample%'
-                AND LOWER(pricebook_name) NOT LIKE '%suggested%'
+            DATE_TRUNC(sfo.order_date, WEEK) as week_start,
+            SUM(CAST(sfo.quantity AS INT64)) as qty_ordered_cases,
+            SUM(CAST(sfo.quantity AS INT64) * COALESCE(sm.pack_size, 1)) as qty_ordered,
+            SUM(CAST(sfo.line_total_price AS FLOAT64)) as order_value,
+            COUNT(DISTINCT sfo.order_id) as order_count
+        FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
+        LEFT JOIN sku_map sm ON sfo.sku = sm.sf_sku
+        WHERE sfo.account_type IN ('Distributor', 'Distribution Center')
+            AND sfo.order_status != 'Draft'
+            AND sfo.order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_weeks} WEEK)
+            AND sfo.order_date <= CURRENT_DATE()
+            AND (sfo.pricebook_name IS NULL OR (
+                LOWER(sfo.pricebook_name) NOT LIKE '%sample%'
+                AND LOWER(sfo.pricebook_name) NOT LIKE '%suggested%'
             ))
         GROUP BY week_start
     ),
@@ -574,7 +594,9 @@ def load_woi_by_sku(distributor_ids: list = None):
         vip_item_code,
         product_name,
         product_category,
+        qty_ordered_cases,
         qty_ordered,
+        order_value,
         qty_depleted,
         weekly_depletion_rate,
         weeks_of_inventory,
@@ -1940,12 +1962,17 @@ def main():
                 else:
                     st.info("No understock SKU × Distributor combinations")
 
-            # WOI Heatmap by Product Category × Distributor
-            st.markdown("**WOI Heatmap by Product Category (Top 15 Distributors)**")
+            # WOI Heatmap by Product Category × Distributor (Top 15 by Revenue)
+            st.markdown("**Weeks of Inventory by Product (Top 15 Distributors)**")
+            st.caption("🟢 Green = Balanced (2-8 wks) | 🔴 Red = Understock (<2 wks) | 🟡 Yellow = Overstock (>8 wks)")
 
-            heatmap_df = woi_sku_df.groupby(['distributor_name', 'product_category']).agg({
+            # Exclude 25mg products (discontinued)
+            heatmap_source = woi_sku_df[~woi_sku_df['product_category'].str.contains('25mg', na=False)]
+
+            heatmap_df = heatmap_source.groupby(['distributor_name', 'product_category']).agg({
                 'weeks_of_inventory': 'mean',
-                'qty_depleted': 'sum'
+                'qty_depleted': 'sum',
+                'order_value': 'sum'
             }).reset_index()
 
             if len(heatmap_df) > 0:
@@ -1955,44 +1982,80 @@ def main():
                     values='weeks_of_inventory'
                 ).fillna(0)
 
-                top_distros = heatmap_df.groupby('distributor_name')['qty_depleted'].sum().nlargest(15).index.tolist()
+                # Select top 15 distributors by revenue (order_value)
+                top_distros = heatmap_df.groupby('distributor_name')['order_value'].sum().nlargest(15).index.tolist()
                 pivot_df = pivot_df.loc[pivot_df.index.isin(top_distros)]
+
+                # Sort by total revenue descending
+                distro_revenue = heatmap_df.groupby('distributor_name')['order_value'].sum()
+                pivot_df = pivot_df.loc[pivot_df.index.map(lambda x: distro_revenue.get(x, 0)).argsort()[::-1]]
 
                 # Reorder columns by product family (Bottles, Seltzers, Shots)
                 column_order = [
                     '2mg 750ml Bottle', '5mg 750ml Bottle', '10mg 750ml Bottle',
                     '10mg 16oz Seltzer', '5mg 12oz Seltzer',
-                    '5mg 2oz Shot', '10mg 2oz Shot', '25mg 2oz Shot'
+                    '5mg 2oz Shot', '10mg 2oz Shot'
                 ]
                 ordered_cols = [c for c in column_order if c in pivot_df.columns]
                 pivot_df = pivot_df[ordered_cols]
 
+                # Shorten column names for readability
+                short_names = {
+                    '2mg 750ml Bottle': '2mg Bottle',
+                    '5mg 750ml Bottle': '5mg Bottle',
+                    '10mg 750ml Bottle': '10mg Bottle',
+                    '10mg 16oz Seltzer': '10mg Seltzer',
+                    '5mg 12oz Seltzer': '5mg Seltzer',
+                    '5mg 2oz Shot': '5mg Shot',
+                    '10mg 2oz Shot': '10mg Shot'
+                }
+                pivot_df.columns = [short_names.get(c, c) for c in pivot_df.columns]
+
+                # Clip extreme values for better color scaling (-20 to +20 weeks)
+                z_values = pivot_df.values.clip(-20, 20)
+
                 if not pivot_df.empty:
                     fig = go.Figure(data=go.Heatmap(
-                        z=pivot_df.values,
+                        z=z_values,
                         x=pivot_df.columns.tolist(),
                         y=pivot_df.index.tolist(),
                         colorscale=[
-                            [0, '#ff6b6b'],
-                            [0.3, '#1a1a2e'],
-                            [0.5, '#64ffda'],
-                            [1, '#ffd666']
+                            [0, '#ff6b6b'],      # Red = negative/understock
+                            [0.25, '#ff9f43'],   # Orange
+                            [0.4, '#64ffda'],    # Green = balanced (around 4 weeks)
+                            [0.6, '#64ffda'],    # Green
+                            [0.75, '#ffd666'],   # Yellow = overstock
+                            [1, '#ffd666']       # Yellow = high overstock
                         ],
+                        zmin=-20,
+                        zmax=20,
                         zmid=4,
                         text=pivot_df.values.round(1),
                         texttemplate='%{text}',
-                        textfont={"size": 10, "color": "#ccd6f6"},
-                        hovertemplate='%{y}<br>%{x}<br>WOI: %{z:.1f} weeks<extra></extra>'
+                        textfont={"size": 14, "color": "#1a1a2e", "family": "Arial Black"},
+                        hovertemplate='<b>%{y}</b><br>%{x}<br>WOI: %{z:.1f} weeks<extra></extra>'
                     ))
 
                     fig.update_layout(
                         paper_bgcolor='rgba(0,0,0,0)',
                         plot_bgcolor='rgba(0,0,0,0)',
-                        font=dict(color='#ccd6f6'),
-                        height=500,
-                        margin=dict(l=0, r=0, t=10, b=100),
-                        xaxis=dict(tickangle=-45, gridcolor='rgba(255,255,255,0.1)'),
-                        yaxis=dict(gridcolor='rgba(255,255,255,0.1)')
+                        font=dict(color='#ccd6f6', size=12),
+                        height=600,
+                        margin=dict(l=250, r=50, t=30, b=80),
+                        xaxis=dict(
+                            tickangle=0,
+                            tickfont=dict(size=12, color='#ccd6f6'),
+                            side='bottom'
+                        ),
+                        yaxis=dict(
+                            tickfont=dict(size=11, color='#ccd6f6'),
+                            automargin=True
+                        ),
+                        coloraxis_colorbar=dict(
+                            title="WOI (weeks)",
+                            tickvals=[-20, -10, 0, 4, 10, 20],
+                            ticktext=['-20', '-10', '0', '4', '10', '20+']
+                        )
                     )
                     st.plotly_chart(fig, use_container_width=True)
 
@@ -2037,7 +2100,7 @@ def main():
                 # Seltzers (16oz and 12oz together)
                 '10mg 16oz Seltzer': 20, '5mg 12oz Seltzer': 21,
                 # 2oz Shots
-                '5mg 2oz Shot': 30, '10mg 2oz Shot': 31, '25mg 2oz Shot': 32
+                '5mg 2oz Shot': 30, '10mg 2oz Shot': 31
             }
             display_woi['_sort_order'] = display_woi['product_category'].map(category_sort_order).fillna(99)
 
