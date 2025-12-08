@@ -2038,11 +2038,11 @@ def main():
                         plot_bgcolor='rgba(0,0,0,0)',
                         font=dict(color='#ccd6f6', size=12),
                         height=600,
-                        margin=dict(l=250, r=50, t=30, b=80),
+                        margin=dict(l=250, r=50, t=80, b=30),
                         xaxis=dict(
                             tickangle=0,
                             tickfont=dict(size=12, color='#ccd6f6'),
-                            side='bottom'
+                            side='top'
                         ),
                         yaxis=dict(
                             tickfont=dict(size=11, color='#ccd6f6'),
