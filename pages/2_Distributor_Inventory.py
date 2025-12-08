@@ -554,6 +554,40 @@ def load_distributor_weekly_trends(lookback_weeks: int = 12):
     return client.query(query).to_dataframe()
 
 
+@st.cache_data(ttl=300)
+def load_woi_by_sku(distributor_codes: list = None):
+    """Load WOI by distributor x SKU from pre-computed mart table."""
+    client = get_bq_client()
+
+    distributor_filter = ""
+    if distributor_codes and len(distributor_codes) > 0:
+        codes_str = "', '".join(distributor_codes)
+        distributor_filter = f"WHERE distributor_code IN ('{codes_str}')"
+
+    query = f"""
+    SELECT
+        distributor_code,
+        distributor_name,
+        vip_item_code,
+        product_name,
+        product_category,
+        qty_ordered,
+        qty_depleted,
+        weekly_depletion_rate,
+        weeks_of_inventory,
+        inventory_status,
+        velocity_tier,
+        order_depletion_ratio,
+        implied_inventory_delta,
+        last_order_date,
+        last_depletion_date
+    FROM `artful-logic-475116-p1.staging_vip.woi_by_distro_sku`
+    {distributor_filter}
+    ORDER BY distributor_name, qty_depleted DESC
+    """
+    return client.query(query).to_dataframe()
+
+
 def calculate_stockout_risk(inventory_df: pd.DataFrame, dist_trends_df: pd.DataFrame):
     """
     Calculate stockout risk for each distributor based on:
@@ -1769,6 +1803,229 @@ def main():
             st.info("No state-level depletion data available")
     except Exception as e:
         st.warning(f"Could not load state depletion data: {e}")
+
+    # WOI by Distributor x SKU Section
+    st.markdown('<p class="section-header">Weeks of Inventory by Distributor x SKU</p>', unsafe_allow_html=True)
+
+    try:
+        # Load WOI by SKU data
+        woi_sku_codes = None
+        if "All Distributors" not in selected_distributors and len(selected_distributors) > 0:
+            woi_sku_codes = filtered_df['distributor_code'].tolist()
+
+        woi_sku_df = load_woi_by_sku(distributor_codes=woi_sku_codes)
+
+        if not woi_sku_df.empty:
+            # Summary metrics for SKU-level
+            woi_metric_cols = st.columns(4)
+
+            with woi_metric_cols[0]:
+                sku_overstock = len(woi_sku_df[woi_sku_df['inventory_status'] == 'Overstock'])
+                st.markdown(f"""
+                <div class="metric-card">
+                    <p class="metric-value-warning">{sku_overstock}</p>
+                    <p class="metric-label">SKU × Distro Overstock</p>
+                </div>
+                """, unsafe_allow_html=True)
+
+            with woi_metric_cols[1]:
+                sku_understock = len(woi_sku_df[woi_sku_df['inventory_status'] == 'Understock'])
+                st.markdown(f"""
+                <div class="metric-card">
+                    <p class="metric-value-danger">{sku_understock}</p>
+                    <p class="metric-label">SKU × Distro Understock</p>
+                </div>
+                """, unsafe_allow_html=True)
+
+            with woi_metric_cols[2]:
+                high_velocity = len(woi_sku_df[woi_sku_df['velocity_tier'] == 'High'])
+                st.markdown(f"""
+                <div class="metric-card">
+                    <p class="metric-value">{high_velocity}</p>
+                    <p class="metric-label">High Velocity SKUs</p>
+                </div>
+                """, unsafe_allow_html=True)
+
+            with woi_metric_cols[3]:
+                total_combos = len(woi_sku_df)
+                st.markdown(f"""
+                <div class="metric-card">
+                    <p class="metric-value">{total_combos:,}</p>
+                    <p class="metric-label">Active SKU × Distro</p>
+                </div>
+                """, unsafe_allow_html=True)
+
+            # Charts: Top Overstock and Understock by SKU × Distributor
+            woi_chart_cols = st.columns(2)
+
+            with woi_chart_cols[0]:
+                st.markdown("**Top Overstock (SKU × Distributor)**")
+                overstock_sku = woi_sku_df[
+                    (woi_sku_df['inventory_status'] == 'Overstock') &
+                    (woi_sku_df['weeks_of_inventory'].notna())
+                ].nlargest(10, 'weeks_of_inventory')
+
+                if not overstock_sku.empty:
+                    overstock_sku = overstock_sku.copy()
+                    overstock_sku['label'] = overstock_sku['product_name'].str[:25] + ' @ ' + overstock_sku['distributor_name'].str[:20]
+
+                    fig = go.Figure(go.Bar(
+                        x=overstock_sku['weeks_of_inventory'],
+                        y=overstock_sku['label'],
+                        orientation='h',
+                        marker=dict(color='#ffd666'),
+                        text=overstock_sku['weeks_of_inventory'].apply(lambda x: f'{x:.0f} wks'),
+                        textposition='outside',
+                        textfont=dict(color='#ccd6f6'),
+                        hovertemplate='%{y}<br>WOI: %{x:.1f} weeks<extra></extra>'
+                    ))
+
+                    fig.update_layout(
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        font=dict(color='#ccd6f6'),
+                        height=350,
+                        margin=dict(l=0, r=60, t=10, b=0),
+                        yaxis=dict(autorange='reversed', gridcolor='rgba(255,255,255,0.1)'),
+                        xaxis=dict(gridcolor='rgba(255,255,255,0.1)')
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No overstock SKU × Distributor combinations")
+
+            with woi_chart_cols[1]:
+                st.markdown("**Top Understock (SKU × Distributor)**")
+                understock_sku = woi_sku_df[
+                    (woi_sku_df['inventory_status'] == 'Understock') &
+                    (woi_sku_df['weeks_of_inventory'].notna())
+                ].nsmallest(10, 'weeks_of_inventory')
+
+                if not understock_sku.empty:
+                    understock_sku = understock_sku.copy()
+                    understock_sku['label'] = understock_sku['product_name'].str[:25] + ' @ ' + understock_sku['distributor_name'].str[:20]
+
+                    fig = go.Figure(go.Bar(
+                        x=understock_sku['weeks_of_inventory'].abs(),
+                        y=understock_sku['label'],
+                        orientation='h',
+                        marker=dict(color='#ff6b6b'),
+                        text=understock_sku['weeks_of_inventory'].apply(lambda x: f'{x:.1f} wks'),
+                        textposition='outside',
+                        textfont=dict(color='#ccd6f6'),
+                        hovertemplate='%{y}<br>WOI: %{text}<extra></extra>'
+                    ))
+
+                    fig.update_layout(
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        font=dict(color='#ccd6f6'),
+                        height=350,
+                        margin=dict(l=0, r=60, t=10, b=0),
+                        yaxis=dict(autorange='reversed', gridcolor='rgba(255,255,255,0.1)'),
+                        xaxis=dict(gridcolor='rgba(255,255,255,0.1)')
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No understock SKU × Distributor combinations")
+
+            # WOI Heatmap by Product Category × Distributor
+            st.markdown("**WOI Heatmap by Product Category (Top 15 Distributors)**")
+
+            heatmap_df = woi_sku_df.groupby(['distributor_name', 'product_category']).agg({
+                'weeks_of_inventory': 'mean',
+                'qty_depleted': 'sum'
+            }).reset_index()
+
+            if len(heatmap_df) > 0:
+                pivot_df = heatmap_df.pivot(
+                    index='distributor_name',
+                    columns='product_category',
+                    values='weeks_of_inventory'
+                ).fillna(0)
+
+                top_distros = heatmap_df.groupby('distributor_name')['qty_depleted'].sum().nlargest(15).index.tolist()
+                pivot_df = pivot_df.loc[pivot_df.index.isin(top_distros)]
+
+                if not pivot_df.empty:
+                    fig = go.Figure(data=go.Heatmap(
+                        z=pivot_df.values,
+                        x=pivot_df.columns.tolist(),
+                        y=pivot_df.index.tolist(),
+                        colorscale=[
+                            [0, '#ff6b6b'],
+                            [0.3, '#1a1a2e'],
+                            [0.5, '#64ffda'],
+                            [1, '#ffd666']
+                        ],
+                        zmid=4,
+                        text=pivot_df.values.round(1),
+                        texttemplate='%{text}',
+                        textfont={"size": 10, "color": "#ccd6f6"},
+                        hovertemplate='%{y}<br>%{x}<br>WOI: %{z:.1f} weeks<extra></extra>'
+                    ))
+
+                    fig.update_layout(
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        font=dict(color='#ccd6f6'),
+                        height=500,
+                        margin=dict(l=0, r=0, t=10, b=100),
+                        xaxis=dict(tickangle=-45, gridcolor='rgba(255,255,255,0.1)'),
+                        yaxis=dict(gridcolor='rgba(255,255,255,0.1)')
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+            # Detailed SKU × Distributor Table
+            st.markdown("**WOI Details by SKU × Distributor**")
+
+            woi_filter_cols = st.columns(2)
+            with woi_filter_cols[0]:
+                woi_status_filter = st.multiselect(
+                    "Filter by Status",
+                    options=['All', 'Overstock', 'Understock', 'Balanced', 'No Depletion', 'No Orders'],
+                    default=['All'],
+                    key='woi_status_filter'
+                )
+            with woi_filter_cols[1]:
+                woi_category_filter = st.multiselect(
+                    "Filter by Product Category",
+                    options=['All'] + sorted(woi_sku_df['product_category'].dropna().unique().tolist()),
+                    default=['All'],
+                    key='woi_category_filter'
+                )
+
+            display_woi = woi_sku_df.copy()
+            if 'All' not in woi_status_filter:
+                display_woi = display_woi[display_woi['inventory_status'].isin(woi_status_filter)]
+            if 'All' not in woi_category_filter:
+                display_woi = display_woi[display_woi['product_category'].isin(woi_category_filter)]
+
+            display_cols = display_woi[[
+                'distributor_name', 'product_name', 'product_category',
+                'qty_ordered', 'qty_depleted', 'weekly_depletion_rate',
+                'weeks_of_inventory', 'inventory_status', 'velocity_tier'
+            ]].copy()
+
+            display_cols['weeks_of_inventory'] = display_cols['weeks_of_inventory'].apply(
+                lambda x: f"{x:.1f}" if pd.notna(x) else "N/A"
+            )
+            display_cols.columns = [
+                'Distributor', 'Product', 'Category', 'Qty Ordered', 'Qty Depleted',
+                'Weekly Rate', 'WOI', 'Status', 'Velocity'
+            ]
+
+            st.dataframe(
+                display_cols.sort_values('Qty Depleted', ascending=False),
+                use_container_width=True,
+                hide_index=True,
+                height=500
+            )
+
+        else:
+            st.info("No WOI by SKU data available")
+
+    except Exception as e:
+        st.warning(f"Could not load WOI by SKU data: {e}")
 
     # Footer
     st.markdown(f"""
