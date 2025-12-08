@@ -2000,22 +2000,38 @@ def main():
             if 'All' not in woi_category_filter:
                 display_woi = display_woi[display_woi['product_category'].isin(woi_category_filter)]
 
+            # Add product family sort order (group by format: Bottles, Seltzers, Shots)
+            category_sort_order = {
+                # 750ml Bottles
+                '2mg 750ml Bottle': 10, '5mg 750ml Bottle': 11, '10mg 750ml Bottle': 12,
+                # Seltzers (16oz and 12oz together)
+                '10mg 16oz Seltzer': 20, '5mg 12oz Seltzer': 21,
+                # 2oz Shots
+                '5mg 2oz Shot': 30, '10mg 2oz Shot': 31, '25mg 2oz Shot': 32
+            }
+            display_woi['_sort_order'] = display_woi['product_category'].map(category_sort_order).fillna(99)
+
             display_cols = display_woi[[
                 'distributor_name', 'product_name', 'product_category',
                 'qty_ordered', 'qty_depleted', 'weekly_depletion_rate',
-                'weeks_of_inventory', 'inventory_status', 'velocity_tier'
+                'weeks_of_inventory', 'inventory_status', 'velocity_tier', '_sort_order'
             ]].copy()
 
             display_cols['weeks_of_inventory'] = display_cols['weeks_of_inventory'].apply(
                 lambda x: f"{x:.1f}" if pd.notna(x) else "N/A"
             )
+
+            # Sort by distributor, then product family
+            display_cols = display_cols.sort_values(['distributor_name', '_sort_order', 'product_name'])
+            display_cols = display_cols.drop(columns=['_sort_order'])
+
             display_cols.columns = [
                 'Distributor', 'Product', 'Category', 'Qty Ordered', 'Qty Depleted',
                 'Weekly Rate', 'WOI', 'Status', 'Velocity'
             ]
 
             st.dataframe(
-                display_cols.sort_values('Qty Depleted', ascending=False),
+                display_cols,
                 use_container_width=True,
                 hide_index=True,
                 height=500
