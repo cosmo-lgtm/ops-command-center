@@ -1966,8 +1966,15 @@ def main():
             st.markdown("**Weeks of Inventory by Product (Top 15 Distributors)**")
             st.caption("🟢 Green = Balanced (2-8 wks) | 🔴 Red = Understock (<2 wks) | 🟡 Yellow = Overstock (>8 wks)")
 
-            # Exclude 25mg products (discontinued)
-            heatmap_source = woi_sku_df[~woi_sku_df['product_category'].str.contains('25mg', na=False)]
+            # Filter data for meaningful WOI display:
+            # - Exclude 25mg products (discontinued)
+            # - Exclude null WOI (non-VIP distributors with no depletion data)
+            # - Exclude extreme outliers (WOI > 52 weeks = 1 year, likely data issues)
+            heatmap_source = woi_sku_df[
+                (~woi_sku_df['product_category'].str.contains('25mg', na=False)) &
+                (woi_sku_df['weeks_of_inventory'].notna()) &
+                (woi_sku_df['weeks_of_inventory'].between(-52, 52))
+            ]
 
             heatmap_df = heatmap_source.groupby(['distributor_name', 'product_category']).agg({
                 'weeks_of_inventory': 'mean',
@@ -2008,8 +2015,8 @@ def main():
                 }
                 pivot_df.columns = [short_names.get(c, c) for c in pivot_df.columns]
 
-                # Clip extreme values for better color scaling (-20 to +20 weeks)
-                z_values = pivot_df.values.clip(-20, 20)
+                # Clip extreme values for better color scaling (-52 to +52 weeks)
+                z_values = pivot_df.values.clip(-52, 52)
 
                 if not pivot_df.empty:
                     fig = go.Figure(data=go.Heatmap(
@@ -2024,8 +2031,8 @@ def main():
                             [0.75, '#ffd666'],   # Yellow = overstock
                             [1, '#ffd666']       # Yellow = high overstock
                         ],
-                        zmin=-20,
-                        zmax=20,
+                        zmin=-52,
+                        zmax=52,
                         zmid=4,
                         text=pivot_df.values.round(1),
                         texttemplate='%{text}',
@@ -2050,8 +2057,8 @@ def main():
                         ),
                         coloraxis_colorbar=dict(
                             title="WOI (weeks)",
-                            tickvals=[-20, -10, 0, 4, 10, 20],
-                            ticktext=['-20', '-10', '0', '4', '10', '20+']
+                            tickvals=[-52, -26, 0, 4, 13, 26, 52],
+                            ticktext=['-52', '-26', '0', '4', '13', '26', '52']
                         )
                     )
                     st.plotly_chart(fig, use_container_width=True)
