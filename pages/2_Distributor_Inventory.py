@@ -555,18 +555,21 @@ def load_distributor_weekly_trends(lookback_weeks: int = 12):
 
 
 @st.cache_data(ttl=300)
-def load_woi_by_sku(distributor_codes: list = None):
-    """Load WOI by distributor x SKU from pre-computed mart table."""
+def load_woi_by_sku(distributor_ids: list = None):
+    """Load WOI by parent distributor x SKU from pre-computed mart table.
+
+    Aggregated at parent distributor level (~50 distributors) not individual DCs.
+    """
     client = get_bq_client()
 
     distributor_filter = ""
-    if distributor_codes and len(distributor_codes) > 0:
-        codes_str = "', '".join(distributor_codes)
-        distributor_filter = f"WHERE distributor_code IN ('{codes_str}')"
+    if distributor_ids and len(distributor_ids) > 0:
+        ids_str = "', '".join(distributor_ids)
+        distributor_filter = f"WHERE distributor_id IN ('{ids_str}')"
 
     query = f"""
     SELECT
-        distributor_code,
+        distributor_id,
         distributor_name,
         vip_item_code,
         product_name,
@@ -579,6 +582,7 @@ def load_woi_by_sku(distributor_codes: list = None):
         velocity_tier,
         order_depletion_ratio,
         implied_inventory_delta,
+        dc_count,
         last_order_date,
         last_depletion_date
     FROM `artful-logic-475116-p1.staging_vip.woi_by_distro_sku`
@@ -1809,11 +1813,10 @@ def main():
 
     try:
         # Load WOI by SKU data
-        woi_sku_codes = None
-        if "All Distributors" not in selected_distributors and len(selected_distributors) > 0:
-            woi_sku_codes = filtered_df['distributor_code'].tolist()
-
-        woi_sku_df = load_woi_by_sku(distributor_codes=woi_sku_codes)
+        # Load WOI data - aggregated at parent distributor level (~50 distributors)
+        # Note: filtering by selected distributors would require mapping VIP codes to SF account IDs
+        # For now, load all and filter in UI if needed
+        woi_sku_df = load_woi_by_sku()
 
         if not woi_sku_df.empty:
             # Summary metrics for SKU-level
@@ -1987,15 +1990,22 @@ def main():
             # Detailed SKU × Distributor Table
             st.markdown("**WOI Details by SKU × Distributor**")
 
-            woi_filter_cols = st.columns(2)
+            woi_filter_cols = st.columns(3)
             with woi_filter_cols[0]:
+                woi_distro_filter = st.multiselect(
+                    "Filter by Distributor",
+                    options=['All'] + sorted(woi_sku_df['distributor_name'].dropna().unique().tolist()),
+                    default=['All'],
+                    key='woi_distro_filter'
+                )
+            with woi_filter_cols[1]:
                 woi_status_filter = st.multiselect(
                     "Filter by Status",
                     options=['All', 'Overstock', 'Understock', 'Balanced', 'No Depletion', 'No Orders'],
                     default=['All'],
                     key='woi_status_filter'
                 )
-            with woi_filter_cols[1]:
+            with woi_filter_cols[2]:
                 woi_category_filter = st.multiselect(
                     "Filter by Product Category",
                     options=['All'] + sorted(woi_sku_df['product_category'].dropna().unique().tolist()),
@@ -2004,6 +2014,8 @@ def main():
                 )
 
             display_woi = woi_sku_df.copy()
+            if 'All' not in woi_distro_filter:
+                display_woi = display_woi[display_woi['distributor_name'].isin(woi_distro_filter)]
             if 'All' not in woi_status_filter:
                 display_woi = display_woi[display_woi['inventory_status'].isin(woi_status_filter)]
             if 'All' not in woi_category_filter:
@@ -2020,10 +2032,11 @@ def main():
             }
             display_woi['_sort_order'] = display_woi['product_category'].map(category_sort_order).fillna(99)
 
+            # Include dc_count to show how many DCs rolled up under each parent
             display_cols = display_woi[[
                 'distributor_name', 'product_name', 'product_category',
                 'qty_ordered', 'qty_depleted', 'weekly_depletion_rate',
-                'weeks_of_inventory', 'inventory_status', 'velocity_tier', '_sort_order'
+                'weeks_of_inventory', 'inventory_status', 'velocity_tier', 'dc_count', '_sort_order'
             ]].copy()
 
             display_cols['weeks_of_inventory'] = display_cols['weeks_of_inventory'].apply(
@@ -2036,7 +2049,7 @@ def main():
 
             display_cols.columns = [
                 'Distributor', 'Product', 'Category', 'Qty Ordered', 'Qty Depleted',
-                'Weekly Rate', 'WOI', 'Status', 'Velocity'
+                'Weekly Rate', 'WOI', 'Status', 'Velocity', 'DCs'
             ]
 
             st.dataframe(

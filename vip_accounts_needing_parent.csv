@@ -1,0 +1,35 @@
+VIP Account Name,VIP_ID,Question for Distro Manager
+Adams Beverages Inc. - Birmingham,D095,Which SF account receives orders for this DC?
+Adams Beverages Inc. - Dothan,D102,Which SF account receives orders for this DC?
+Atlanta Beverage - Atlanta,D046,Which SF account receives orders for this DC?
+Atlanta Beverage - Griffin,D048,Which SF account receives orders for this DC?
+Atlanta Beverage - Marietta,D049,Which SF account receives orders for this DC?
+Bama Budweiser of Montgomery,D059,What is the parent/HQ account in Salesforce?
+Bernie Little Dist - Lakeland,D050,What is the parent/HQ account in Salesforce?
+Bernie Little Dist - Sebring,D051,What is the parent/HQ account in Salesforce?
+Carroll Distributing Co. Inc.,D012,What is the parent/HQ account in Salesforce?
+Daytona Beverage LLC,D074,What is the parent/HQ account in Salesforce?
+Eagle Rock Distributing - Norcross,D001,Is this under Green Eagle Distributing?
+Frank Liquor,D041,Has VIP_ID but no recent SF orders - is this active?
+Golden Eagle Distributing - Hannibal,D087,What is the parent/HQ account in Salesforce?
+Golden Eagle Illinois - Jacksonville,D088,What is the parent/HQ account in Salesforce?
+Great Bay Dist. - Holiday,D055,What is the parent/HQ account in Salesforce?
+Great Bay Dist. - St. Petersburg,D056,What is the parent/HQ account in Salesforce?
+Grey Eagle Distributors,D058,What is the parent/HQ account in Salesforce?
+H.W. Herrell Distributing Co.,D090,What is the parent/HQ account in Salesforce?
+Harrison Beverage Co,D064,What is the parent/HQ account in Salesforce?
+House of Schwan,D004,What is the parent/HQ account in Salesforce?
+Krey Distributing Co.,D034,What is the parent/HQ account in Salesforce?
+La Grange Grocery Company,D091,Is this under AHC Distributing?
+N.H. Scheppers Distributing - Jefferson,D017,What is the parent/HQ account in Salesforce?
+North Florida Sales - Jacksonville,D039,What is the parent/HQ account in Salesforce?
+North Florida Sales - Lake City,D040,What is the parent/HQ account in Salesforce?
+Northern Eagle Beverage Co.,D035,Is this under Ne Enterprises Inc?
+Pepin Distributing Co.,D065,What is the parent/HQ account in Salesforce?
+R.H. Barringer - Greensboro,D022,What is the parent/HQ account in Salesforce?
+Southern Crown (Myr),3993829,Is this under Southern Horizon Logistics?
+Southern Crown Partners - Vidalia,GA02,Is this under Southern Horizon Logistics?
+Southern Eagle Dist,D013,Is this under Southern Horizon Logistics?
+Tri-Eagle Sales - Ocala,D038,What is the parent/HQ account in Salesforce?
+Tri-Eagle Sales (busch-transou),D037,What is the parent/HQ account in Salesforce?
+Wayne Densch Inc.,D054,What is the parent/HQ account in Salesforce?
