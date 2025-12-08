@@ -1982,13 +1982,10 @@ def main():
                     values='weeks_of_inventory'
                 ).fillna(0)
 
-                # Select top 15 distributors by revenue (order_value)
-                top_distros = heatmap_df.groupby('distributor_name')['order_value'].sum().nlargest(15).index.tolist()
-                pivot_df = pivot_df.loc[pivot_df.index.isin(top_distros)]
-
-                # Sort by total revenue descending
-                distro_revenue = heatmap_df.groupby('distributor_name')['order_value'].sum()
-                pivot_df = pivot_df.loc[pivot_df.index.map(lambda x: distro_revenue.get(x, 0)).argsort()[::-1]]
+                # Select top 15 distributors by revenue (order_value), sorted descending
+                distro_revenue = heatmap_df.groupby('distributor_name')['order_value'].sum().nlargest(15)
+                top_distros = distro_revenue.index.tolist()
+                pivot_df = pivot_df.reindex(top_distros)
 
                 # Reorder columns by product family (Bottles, Seltzers, Shots)
                 column_order = [
