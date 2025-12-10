@@ -238,6 +238,50 @@ def load_tag_analysis():
 
 
 @st.cache_data(ttl=300)
+def load_monthly_tag_trends():
+    """Load monthly tag-based metrics for DTC CEO view."""
+    client = get_bq_client()
+    query = """
+    SELECT
+        FORMAT_DATE('%Y-%m', created_month) as month,
+        tag,
+        SUM(ticket_count) as count
+    FROM `artful-logic-475116-p1.mart_zendesk.dim_tag_analysis`
+    WHERE tag IN ('address_change', 'wrongaddress', 'order_status', 'reship', 'protectly', 'reshipment')
+      AND created_month >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH)
+    GROUP BY 1, 2
+    ORDER BY 1, 2
+    """
+    return client.query(query).to_dataframe()
+
+
+@st.cache_data(ttl=300)
+def load_monthly_tickets():
+    """Load monthly CS ticket totals for trend."""
+    client = get_bq_client()
+    query = """
+    SELECT
+        FORMAT_DATE('%Y-%m', created_date) as month,
+        SUM(ticket_count) as total_tickets
+    FROM `artful-logic-475116-p1.mart_zendesk.dim_daily_metrics`
+    WHERE created_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH)
+    GROUP BY 1
+    ORDER BY 1
+    """
+    return client.query(query).to_dataframe()
+
+
+def format_month_label(month_str):
+    """Convert 2024-01 to Jan '24 format."""
+    try:
+        from datetime import datetime as dt
+        d = dt.strptime(month_str, '%Y-%m')
+        return d.strftime("%b '%y")
+    except:
+        return month_str
+
+
+@st.cache_data(ttl=300)
 def load_hourly_heatmap():
     """Load hourly distribution data for heatmap."""
     client = get_bq_client()
@@ -498,6 +542,82 @@ def main():
                     yaxis={'autorange': 'reversed'}
                 )
                 st.plotly_chart(fig, use_container_width=True)
+
+    # ----- DTC CEO Metrics Section -----
+    st.markdown('<p class="section-header">📊 DTC Monthly Trends (CEO View)</p>', unsafe_allow_html=True)
+
+    try:
+        monthly_tickets_df = load_monthly_tickets()
+        monthly_tags_df = load_monthly_tag_trends()
+
+        if not monthly_tickets_df.empty and not monthly_tags_df.empty:
+            all_months = sorted(monthly_tickets_df['month'].unique())
+            month_labels = [format_month_label(m) for m in all_months]
+
+            # Helper to get tag series
+            def get_tag_series(tags_df, tag_names):
+                if isinstance(tag_names, str):
+                    tag_names = [tag_names]
+                filtered = tags_df[tags_df['tag'].isin(tag_names)]
+                return filtered.groupby('month')['count'].sum().reset_index()
+
+            # Row 1: Monthly Tickets + Reships
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.markdown("**Monthly Ticket Volume**")
+                fig = go.Figure()
+                fig.add_trace(go.Bar(
+                    x=month_labels,
+                    y=monthly_tickets_df['total_tickets'],
+                    marker_color=COLORS['primary'],
+                    hovertemplate='%{x}<br>Tickets: %{y:,}<extra></extra>'
+                ))
+                apply_dark_theme(fig, height=250)
+                st.plotly_chart(fig, use_container_width=True)
+
+            with col2:
+                st.markdown("**Reships (CS + Protectly)**")
+                cs_reships = get_tag_series(monthly_tags_df, ['reship', 'reshipment'])
+                protectly = get_tag_series(monthly_tags_df, 'protectly')
+
+                cs_aligned = pd.DataFrame({'month': all_months}).merge(cs_reships, on='month', how='left').fillna(0)
+                prot_aligned = pd.DataFrame({'month': all_months}).merge(protectly, on='month', how='left').fillna(0)
+
+                fig = go.Figure()
+                fig.add_trace(go.Bar(name='CS Reships', x=month_labels, y=cs_aligned['count'], marker_color=COLORS['primary']))
+                fig.add_trace(go.Bar(name='Protectly', x=month_labels, y=prot_aligned['count'], marker_color='#f093fb'))
+                fig.update_layout(barmode='group')
+                apply_dark_theme(fig, height=250, legend=dict(orientation="h", yanchor="bottom", y=1.02, x=1, xanchor="right", font=dict(color='#8892b0', size=10)))
+                st.plotly_chart(fig, use_container_width=True)
+
+            # Row 2: Address Changes + Order Status
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.markdown("**Address Change Requests**")
+                addr = get_tag_series(monthly_tags_df, ['address_change', 'wrongaddress'])
+                addr_aligned = pd.DataFrame({'month': all_months}).merge(addr, on='month', how='left').fillna(0)
+
+                fig = go.Figure()
+                fig.add_trace(go.Bar(x=month_labels, y=addr_aligned['count'], marker_color=COLORS['warning']))
+                apply_dark_theme(fig, height=220)
+                st.plotly_chart(fig, use_container_width=True)
+
+            with col2:
+                st.markdown("**Order Status Requests**")
+                order_stat = get_tag_series(monthly_tags_df, 'order_status')
+                order_aligned = pd.DataFrame({'month': all_months}).merge(order_stat, on='month', how='left').fillna(0)
+
+                fig = go.Figure()
+                fig.add_trace(go.Bar(x=month_labels, y=order_aligned['count'], marker_color=COLORS['info']))
+                apply_dark_theme(fig, height=220)
+                st.plotly_chart(fig, use_container_width=True)
+
+            st.markdown('<p style="color: #5a6a8a; font-size: 11px; font-style: italic;">Source: Zendesk tags • Rolling 12 months</p>', unsafe_allow_html=True)
+
+    except Exception as e:
+        st.warning(f"Could not load DTC metrics: {e}")
 
     # Footer
     st.markdown(f"""
