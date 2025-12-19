@@ -221,6 +221,18 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
+        st.markdown("""
+        <div class="dashboard-card">
+            <div class="card-icon">📍</div>
+            <div class="card-title">Store Locator (POC)</div>
+            <div class="card-description">
+                Consumer-facing store finder. Shows retailers with products ordered in last 90 days.
+                <br><br>
+                <strong>Data:</strong> Retail Fact Sheet v2 + Google Places + VIP Sales
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
     # Navigation hint
     st.markdown("""
     <div style="text-align: center; margin-top: 48px; color: #8892b0;">
