@@ -199,7 +199,9 @@ def main():
                 data=filtered,
                 get_position=["lon", "lat"],
                 get_fill_color=[102, 126, 234, 200],
-                get_radius=5000,
+                get_radius=800,
+                radius_min_pixels=4,
+                radius_max_pixels=15,
                 pickable=True,
                 auto_highlight=True,
             )
