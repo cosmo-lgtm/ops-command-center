@@ -116,7 +116,7 @@ def load_stores_with_products(state_filter: str = None):
 
     query = f"""
     SELECT *
-    FROM `staging_vip.store_locator_v1`
+    FROM `staging_vip.store_locator_cache`
     {state_clause}
     """
 
