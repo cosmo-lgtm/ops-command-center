@@ -1,13 +1,14 @@
 """
 Store Locator POC
 Consumer-facing store finder showing retailers with products ordered in last 90 days.
-Data source: staging_vip.store_locator_cache (refreshed daily)
+Data source: data/store_locator.json (refreshed daily from BQ)
 """
 
 import streamlit as st
 import pandas as pd
-from google.cloud import bigquery
 import pydeck as pdk
+import json
+from pathlib import Path
 
 # Page config
 st.set_page_config(
@@ -87,43 +88,21 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-@st.cache_resource
-def get_bq_client():
-    return bigquery.Client()
+@st.cache_data
+def load_all_stores():
+    """Load all stores from local JSON file (fast, no network)."""
+    data_path = Path(__file__).parent.parent / "data" / "store_locator.json"
 
+    stores = []
+    with open(data_path, 'r') as f:
+        for line in f:
+            stores.append(json.loads(line))
 
-@st.cache_data(ttl=3600)
-def get_available_states():
-    """Get list of states with stores for dropdown."""
-    client = get_bq_client()
-    query = """
-    SELECT DISTINCT state
-    FROM `staging_vip.store_locator_cache`
-    WHERE state IS NOT NULL
-    ORDER BY state
-    """
-    df = client.query(query).to_dataframe()
-    return df['state'].tolist()
-
-
-@st.cache_data(ttl=3600)
-def load_stores(state_filter: str):
-    """Load stores from pre-computed cache table."""
-    client = get_bq_client()
-
-    query = f"""
-    SELECT *
-    FROM `staging_vip.store_locator_cache`
-    WHERE state = '{state_filter}'
-    """
-
-    df = client.query(query).to_dataframe()
-    return df
+    return pd.DataFrame(stores)
 
 
 def render_store_card(store):
     """Render a single store card."""
-    # Build product tags from boolean flags
     products_html = ""
     if store.get('has_bottles'):
         products_html += '<span class="product-tag">Bottles</span>'
@@ -156,8 +135,11 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # Get states list first (fast query from cache)
-    states_list = get_available_states()
+    # Load all data once (cached in memory)
+    df = load_all_stores()
+
+    # Get states list
+    states_list = sorted(df['state'].dropna().unique().tolist())
 
     # Filters row
     col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 1, 2])
@@ -165,17 +147,8 @@ def main():
     with col1:
         selected_state = st.selectbox("Select State", ["-- Select a State --"] + states_list)
 
-    # Only proceed after state is selected
     if selected_state == "-- Select a State --":
         st.info("Select a state to find stores near you")
-        return
-
-    # Load data for selected state
-    with st.spinner(f"Loading stores in {selected_state}..."):
-        df = load_stores(state_filter=selected_state)
-
-    if len(df) == 0:
-        st.warning(f"No stores found in {selected_state}")
         return
 
     # Product category checkboxes
@@ -190,11 +163,11 @@ def main():
         search = st.text_input("Search city or store", placeholder="e.g., Austin, Total Wine")
 
     # Filter data
-    filtered = df.copy()
+    filtered = df[df['state'] == selected_state].copy()
 
-    # Apply product filters (OR logic - show if has ANY selected category)
+    # Apply product filters (OR logic)
     if not (show_bottles and show_cans and show_shots):
-        mask = pd.Series([False] * len(filtered))
+        mask = pd.Series([False] * len(filtered), index=filtered.index)
         if show_bottles:
             mask = mask | filtered['has_bottles'].fillna(False)
         if show_cans:
@@ -218,11 +191,9 @@ def main():
 
     with map_col:
         if len(filtered) > 0:
-            # Calculate center
             center_lat = filtered['lat'].mean()
             center_lon = filtered['lon'].mean()
 
-            # Create map layer
             layer = pdk.Layer(
                 "ScatterplotLayer",
                 data=filtered,
@@ -233,13 +204,11 @@ def main():
                 auto_highlight=True,
             )
 
-            # Tooltip
             tooltip = {
                 "html": "<b>{store_name}</b><br/>{city}, {state}",
                 "style": {"backgroundColor": "#1a1a2e", "color": "white"}
             }
 
-            # View state
             view = pdk.ViewState(
                 latitude=center_lat,
                 longitude=center_lon,
@@ -247,7 +216,6 @@ def main():
                 pitch=0
             )
 
-            # Render map
             st.pydeck_chart(pdk.Deck(
                 layers=[layer],
                 initial_view_state=view,
@@ -260,7 +228,6 @@ def main():
     with list_col:
         st.markdown("### Nearby Stores")
 
-        # Show first 20 stores
         for _, store in filtered.head(20).iterrows():
             render_store_card(store)
 
