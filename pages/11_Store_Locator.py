@@ -220,7 +220,7 @@ def main():
                 layers=[layer],
                 initial_view_state=view,
                 tooltip=tooltip,
-                map_style="mapbox://styles/mapbox/light-v10"
+                map_style="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
             ))
         else:
             st.info("No stores match your search criteria")
