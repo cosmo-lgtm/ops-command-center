@@ -109,66 +109,15 @@ def get_available_states():
 
 @st.cache_data(ttl=3600)
 def load_stores_with_products(state_filter: str = None):
-    """Load stores with their products from last 90 days."""
+    """Load stores from pre-computed view."""
     client = get_bq_client()
 
-    state_clause = f"AND f.state = '{state_filter}'" if state_filter else ""
+    state_clause = f"WHERE state = '{state_filter}'" if state_filter else ""
 
     query = f"""
-    WITH recent_sales AS (
-        SELECT
-            s.Acct_Code,
-            s.Dist_Code,
-            s.Item_Code,
-            SUM(SAFE_CAST(s.Qty AS INT64)) as qty
-        FROM `raw_vip.sales_lite` s
-        WHERE PARSE_DATE('%Y%m%d', s.Invoice_Date) >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
-        GROUP BY s.Acct_Code, s.Dist_Code, s.Item_Code
-    ),
-
-    store_products AS (
-        SELECT
-            rs.Acct_Code,
-            rs.Dist_Code,
-            ARRAY_AGG(DISTINCT m.product_category IGNORE NULLS) as products
-        FROM recent_sales rs
-        LEFT JOIN `staging_vip.sku_mapping` m ON rs.Item_Code = m.vip_item_code
-        WHERE m.product_category IS NOT NULL
-        GROUP BY rs.Acct_Code, rs.Dist_Code
-    ),
-
-    stores_with_products AS (
-        SELECT
-            f.vip_id,
-            f.store_name,
-            f.street_address,
-            f.city,
-            f.state,
-            f.zip,
-            f.google_latitude as lat,
-            f.google_longitude as lon,
-            f.google_rating as rating,
-            f.google_review_count as reviews,
-            f.google_place_id,
-            f.channel_type,
-            f.class_of_trade_name,
-            f.sfdc_account_id,
-            f.most_recent_order_date,
-            sp.products,
-            ROW_NUMBER() OVER (PARTITION BY f.vip_id ORDER BY f.most_recent_order_date DESC) as rn
-        FROM `staging_vip.retail_customer_fact_sheet_v2` f
-        INNER JOIN store_products sp
-            ON f.vip_account_code = sp.Acct_Code
-            AND f.distributor_code = sp.Dist_Code
-        WHERE f.google_latitude IS NOT NULL
-            AND f.google_longitude IS NOT NULL
-            AND f.customer_status IN ('Active', 'At Risk')
-            {state_clause}
-    )
-
-    SELECT * EXCEPT(rn, most_recent_order_date)
-    FROM stores_with_products
-    WHERE rn = 1
+    SELECT *
+    FROM `staging_vip.store_locator_v1`
+    {state_clause}
     """
 
     df = client.query(query).to_dataframe()
