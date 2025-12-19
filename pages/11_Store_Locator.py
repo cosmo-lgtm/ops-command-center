@@ -93,11 +93,28 @@ def get_bq_client():
 
 
 @st.cache_data(ttl=3600)
-def load_stores_with_products():
+def get_available_states():
+    """Get list of states with stores for dropdown."""
+    client = get_bq_client()
+    query = """
+    SELECT DISTINCT f.state
+    FROM `staging_vip.retail_customer_fact_sheet_v2` f
+    WHERE f.google_latitude IS NOT NULL
+        AND f.state IS NOT NULL
+    ORDER BY f.state
+    """
+    df = client.query(query).to_dataframe()
+    return df['state'].tolist()
+
+
+@st.cache_data(ttl=3600)
+def load_stores_with_products(state_filter: str = None):
     """Load stores with their products from last 90 days."""
     client = get_bq_client()
 
-    query = """
+    state_clause = f"AND f.state = '{state_filter}'" if state_filter else ""
+
+    query = f"""
     WITH recent_sales AS (
         SELECT
             s.Acct_Code,
@@ -118,31 +135,40 @@ def load_stores_with_products():
         LEFT JOIN `staging_vip.sku_mapping` m ON rs.Item_Code = m.vip_item_code
         WHERE m.product_category IS NOT NULL
         GROUP BY rs.Acct_Code, rs.Dist_Code
+    ),
+
+    stores_with_products AS (
+        SELECT
+            f.vip_id,
+            f.store_name,
+            f.street_address,
+            f.city,
+            f.state,
+            f.zip,
+            f.google_latitude as lat,
+            f.google_longitude as lon,
+            f.google_rating as rating,
+            f.google_review_count as reviews,
+            f.google_place_id,
+            f.channel_type,
+            f.class_of_trade_name,
+            f.sfdc_account_id,
+            f.most_recent_order_date,
+            sp.products,
+            ROW_NUMBER() OVER (PARTITION BY f.vip_id ORDER BY f.most_recent_order_date DESC) as rn
+        FROM `staging_vip.retail_customer_fact_sheet_v2` f
+        INNER JOIN store_products sp
+            ON f.vip_account_code = sp.Acct_Code
+            AND f.distributor_code = sp.Dist_Code
+        WHERE f.google_latitude IS NOT NULL
+            AND f.google_longitude IS NOT NULL
+            AND f.customer_status IN ('Active', 'At Risk')
+            {state_clause}
     )
 
-    SELECT
-        f.vip_id,
-        f.store_name,
-        f.street_address,
-        f.city,
-        f.state,
-        f.zip,
-        f.google_latitude as lat,
-        f.google_longitude as lon,
-        f.google_rating as rating,
-        f.google_review_count as reviews,
-        f.google_place_id,
-        f.channel_type,
-        f.class_of_trade_name,
-        f.sfdc_account_id,
-        sp.products
-    FROM `staging_vip.retail_customer_fact_sheet_v2` f
-    INNER JOIN store_products sp
-        ON f.vip_account_code = sp.Acct_Code
-        AND f.distributor_code = sp.Dist_Code
-    WHERE f.google_latitude IS NOT NULL
-        AND f.google_longitude IS NOT NULL
-        AND f.customer_status = 'Active'
+    SELECT * EXCEPT(rn, most_recent_order_date)
+    FROM stores_with_products
+    WHERE rn = 1
     """
 
     df = client.query(query).to_dataframe()
@@ -180,27 +206,38 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # Load data
-    with st.spinner("Loading stores..."):
-        df = load_stores_with_products()
+    # Get states list first (fast query)
+    states_list = get_available_states()
 
-    # Filters
-    col1, col2, col3 = st.columns([2, 1, 1])
+    # Filters - state selection first
+    col1, col2, col3 = st.columns([1, 1, 2])
 
     with col1:
-        search = st.text_input("Search by city or store name", placeholder="e.g., Austin, Total Wine")
+        selected_state = st.selectbox("Select State", ["-- Select a State --"] + states_list)
+
+    # Only load data after state is selected
+    if selected_state == "-- Select a State --":
+        st.info("Select a state to find stores near you")
+        return
+
+    # Load data for selected state
+    with st.spinner(f"Loading stores in {selected_state}..."):
+        df = load_stores_with_products(state_filter=selected_state)
+
+    if len(df) == 0:
+        st.warning(f"No stores with recent orders found in {selected_state}")
+        return
 
     with col2:
-        states = ["All States"] + sorted(df['state'].dropna().unique().tolist())
-        selected_state = st.selectbox("State", states)
-
-    with col3:
-        # Get unique products across all stores
+        # Get unique products for this state
         all_products = set()
         for prods in df['products'].dropna():
             all_products.update(prods)
         products = ["All Products"] + sorted(all_products)
         selected_product = st.selectbox("Product", products)
+
+    with col3:
+        search = st.text_input("Search by city or store name", placeholder="e.g., Austin, Total Wine")
 
     # Filter data
     filtered = df.copy()
