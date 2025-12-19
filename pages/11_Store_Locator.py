@@ -1,7 +1,7 @@
 """
 Store Locator POC
 Consumer-facing store finder showing retailers with products ordered in last 90 days.
-Data source: retail_customer_fact_sheet_v2 + sales_lite + sku_mapping
+Data source: staging_vip.store_locator_cache (refreshed daily)
 """
 
 import streamlit as st
@@ -97,27 +97,24 @@ def get_available_states():
     """Get list of states with stores for dropdown."""
     client = get_bq_client()
     query = """
-    SELECT DISTINCT f.state
-    FROM `staging_vip.retail_customer_fact_sheet_v2` f
-    WHERE f.google_latitude IS NOT NULL
-        AND f.state IS NOT NULL
-    ORDER BY f.state
+    SELECT DISTINCT state
+    FROM `staging_vip.store_locator_cache`
+    WHERE state IS NOT NULL
+    ORDER BY state
     """
     df = client.query(query).to_dataframe()
     return df['state'].tolist()
 
 
 @st.cache_data(ttl=3600)
-def load_stores_with_products(state_filter: str = None):
-    """Load stores from pre-computed view."""
+def load_stores(state_filter: str):
+    """Load stores from pre-computed cache table."""
     client = get_bq_client()
-
-    state_clause = f"WHERE state = '{state_filter}'" if state_filter else ""
 
     query = f"""
     SELECT *
     FROM `staging_vip.store_locator_cache`
-    {state_clause}
+    WHERE state = '{state_filter}'
     """
 
     df = client.query(query).to_dataframe()
@@ -126,13 +123,17 @@ def load_stores_with_products(state_filter: str = None):
 
 def render_store_card(store):
     """Render a single store card."""
+    # Build product tags from boolean flags
     products_html = ""
-    if store['products']:
-        for prod in store['products'][:5]:  # Limit to 5 products
-            products_html += f'<span class="product-tag">{prod}</span>'
+    if store.get('has_bottles'):
+        products_html += '<span class="product-tag">Bottles</span>'
+    if store.get('has_cans'):
+        products_html += '<span class="product-tag">Cans</span>'
+    if store.get('has_shots'):
+        products_html += '<span class="product-tag">Shots</span>'
 
     rating_html = ""
-    if pd.notna(store['rating']):
+    if pd.notna(store.get('rating')):
         stars = "★" * int(store['rating']) + "☆" * (5 - int(store['rating']))
         rating_html = f'<span class="rating">{stars} {store["rating"]:.1f} ({int(store["reviews"])} reviews)</span>'
 
@@ -155,41 +156,52 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # Get states list first (fast query)
+    # Get states list first (fast query from cache)
     states_list = get_available_states()
 
-    # Filters - state selection first
-    col1, col2, col3 = st.columns([1, 1, 2])
+    # Filters row
+    col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 1, 2])
 
     with col1:
         selected_state = st.selectbox("Select State", ["-- Select a State --"] + states_list)
 
-    # Only load data after state is selected
+    # Only proceed after state is selected
     if selected_state == "-- Select a State --":
         st.info("Select a state to find stores near you")
         return
 
     # Load data for selected state
     with st.spinner(f"Loading stores in {selected_state}..."):
-        df = load_stores_with_products(state_filter=selected_state)
+        df = load_stores(state_filter=selected_state)
 
     if len(df) == 0:
-        st.warning(f"No stores with recent orders found in {selected_state}")
+        st.warning(f"No stores found in {selected_state}")
         return
 
+    # Product category checkboxes
     with col2:
-        # Get unique products for this state
-        all_products = set()
-        for prods in df['products'].dropna():
-            all_products.update(prods)
-        products = ["All Products"] + sorted(all_products)
-        selected_product = st.selectbox("Product", products)
-
+        show_bottles = st.checkbox("Bottles", value=True)
     with col3:
-        search = st.text_input("Search by city or store name", placeholder="e.g., Austin, Total Wine")
+        show_cans = st.checkbox("Cans", value=True)
+    with col4:
+        show_shots = st.checkbox("Shots", value=True)
+
+    with col5:
+        search = st.text_input("Search city or store", placeholder="e.g., Austin, Total Wine")
 
     # Filter data
     filtered = df.copy()
+
+    # Apply product filters (OR logic - show if has ANY selected category)
+    if not (show_bottles and show_cans and show_shots):
+        mask = pd.Series([False] * len(filtered))
+        if show_bottles:
+            mask = mask | filtered['has_bottles'].fillna(False)
+        if show_cans:
+            mask = mask | filtered['has_cans'].fillna(False)
+        if show_shots:
+            mask = mask | filtered['has_shots'].fillna(False)
+        filtered = filtered[mask]
 
     if search:
         search_lower = search.lower()
@@ -197,12 +209,6 @@ def main():
             filtered['city'].str.lower().str.contains(search_lower, na=False) |
             filtered['store_name'].str.lower().str.contains(search_lower, na=False)
         ]
-
-    if selected_state != "All States":
-        filtered = filtered[filtered['state'] == selected_state]
-
-    if selected_product != "All Products":
-        filtered = filtered[filtered['products'].apply(lambda x: selected_product in x if x else False)]
 
     # Stats
     st.markdown(f"**{len(filtered):,}** stores found")
@@ -221,7 +227,7 @@ def main():
                 "ScatterplotLayer",
                 data=filtered,
                 get_position=["lon", "lat"],
-                get_fill_color=[102, 126, 234, 200],  # Purple to match brand
+                get_fill_color=[102, 126, 234, 200],
                 get_radius=5000,
                 pickable=True,
                 auto_highlight=True,
@@ -237,7 +243,7 @@ def main():
             view = pdk.ViewState(
                 latitude=center_lat,
                 longitude=center_lon,
-                zoom=4 if selected_state == "All States" else 6,
+                zoom=6,
                 pitch=0
             )
 
