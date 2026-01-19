@@ -101,7 +101,7 @@ def run_query(query: str) -> pd.DataFrame:
 # ============================================================================
 
 @st.cache_data(ttl=300)
-def load_b2b_daily(lookback_days: int = 90):
+def load_b2b_daily(start_date: str, end_date: str):
     """Load B2B (Salesforce) daily sales - all non-draft orders."""
     return run_query(f"""
     SELECT
@@ -112,15 +112,15 @@ def load_b2b_daily(lookback_days: int = 90):
         EXTRACT(DAYOFWEEK FROM sfo.order_date) as day_of_week
     FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
     WHERE sfo.order_status != 'Draft'
-        AND sfo.order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
-        AND sfo.order_date <= CURRENT_DATE()
+        AND sfo.order_date >= '{start_date}'
+        AND sfo.order_date <= '{end_date}'
     GROUP BY sfo.order_date, day_of_week
     ORDER BY sfo.order_date
     """)
 
 
 @st.cache_data(ttl=300)
-def load_b2b_by_account(lookback_days: int = 90):
+def load_b2b_by_account(start_date: str, end_date: str):
     """Load B2B sales by account with owner info."""
     return run_query(f"""
     SELECT
@@ -137,15 +137,15 @@ def load_b2b_by_account(lookback_days: int = 90):
     LEFT JOIN `artful-logic-475116-p1.raw_salesforce.Account` a ON sfo.account_id = a.Id
     LEFT JOIN `artful-logic-475116-p1.raw_salesforce.User` u ON a.OwnerId = u.Id
     WHERE sfo.order_status != 'Draft'
-        AND sfo.order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
-        AND sfo.order_date <= CURRENT_DATE()
+        AND sfo.order_date >= '{start_date}'
+        AND sfo.order_date <= '{end_date}'
     GROUP BY sfo.account_id, sfo.customer_name, sfo.account_type, u.Name
     ORDER BY revenue DESC
     """)
 
 
 @st.cache_data(ttl=300)
-def load_b2b_weekly(lookback_days: int = 90):
+def load_b2b_weekly(start_date: str, end_date: str):
     """Load B2B weekly aggregation."""
     return run_query(f"""
     SELECT
@@ -155,15 +155,15 @@ def load_b2b_weekly(lookback_days: int = 90):
         SUM(CAST(quantity AS FLOAT64)) as units
     FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened`
     WHERE order_status != 'Draft'
-        AND order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
-        AND order_date <= CURRENT_DATE()
+        AND order_date >= '{start_date}'
+        AND order_date <= '{end_date}'
     GROUP BY week_start
     ORDER BY week_start
     """)
 
 
 @st.cache_data(ttl=300)
-def load_b2c_daily(lookback_days: int = 90):
+def load_b2c_daily(start_date: str, end_date: str):
     """Load B2C (Shopify) daily sales."""
     return run_query(f"""
     SELECT
@@ -174,15 +174,15 @@ def load_b2c_daily(lookback_days: int = 90):
     FROM `artful-logic-475116-p1.raw_shopify.orders`
     WHERE cancelled_at IS NULL
         AND financial_status IN ('paid', 'partially_refunded')
-        AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {lookback_days} DAY)
-        AND created_at <= CURRENT_TIMESTAMP()
+        AND DATE(created_at) >= '{start_date}'
+        AND DATE(created_at) <= '{end_date}'
     GROUP BY order_date, day_of_week
     ORDER BY order_date
     """)
 
 
 @st.cache_data(ttl=300)
-def load_b2c_weekly(lookback_days: int = 90):
+def load_b2c_weekly(start_date: str, end_date: str):
     """Load B2C weekly aggregation."""
     return run_query(f"""
     SELECT
@@ -192,15 +192,15 @@ def load_b2c_weekly(lookback_days: int = 90):
     FROM `artful-logic-475116-p1.raw_shopify.orders`
     WHERE cancelled_at IS NULL
         AND financial_status IN ('paid', 'partially_refunded')
-        AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {lookback_days} DAY)
-        AND created_at <= CURRENT_TIMESTAMP()
+        AND DATE(created_at) >= '{start_date}'
+        AND DATE(created_at) <= '{end_date}'
     GROUP BY week_start
     ORDER BY week_start
     """)
 
 
 @st.cache_data(ttl=300)
-def load_b2c_products(lookback_days: int = 90):
+def load_b2c_products(start_date: str, end_date: str):
     """Load B2C product performance."""
     return run_query(f"""
     WITH order_items AS (
@@ -215,7 +215,8 @@ def load_b2c_products(lookback_days: int = 90):
         UNNEST(JSON_QUERY_ARRAY(o.line_items)) as item
         WHERE o.cancelled_at IS NULL
             AND o.financial_status IN ('paid', 'partially_refunded')
-            AND o.created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {lookback_days} DAY)
+            AND DATE(o.created_at) >= '{start_date}'
+            AND DATE(o.created_at) <= '{end_date}'
     )
     SELECT
         product_name,
@@ -376,27 +377,6 @@ def apply_dark_theme(fig, height=350):
 # SIDEBAR
 # ============================================================================
 
-with st.sidebar:
-    st.markdown("### Settings")
-    lookback_days = st.selectbox(
-        "Date Range",
-        options=[30, 60, 90, 180],
-        index=2,
-        format_func=lambda x: f"Last {x} days"
-    )
-
-    forecast_days = st.selectbox(
-        "Forecast Period",
-        options=[7, 14, 30, 60],
-        index=2,
-        format_func=lambda x: f"{x} days"
-    )
-
-    if st.button("🔄 Refresh Data"):
-        st.cache_data.clear()
-        st.rerun()
-
-
 # ============================================================================
 # MAIN CONTENT
 # ============================================================================
@@ -404,14 +384,63 @@ with st.sidebar:
 st.title("📊 Sales Dashboard")
 st.caption("Combined B2B (Salesforce) + B2C (Shopify) Revenue")
 
+# Date range selector at top of page
+today = datetime.now().date()
+ytd_start = datetime(today.year, 1, 1).date()
+
+# Preset options
+date_presets = {
+    "YTD": (ytd_start, today),
+    "Last 30 Days": (today - timedelta(days=30), today),
+    "Last 60 Days": (today - timedelta(days=60), today),
+    "Last 90 Days": (today - timedelta(days=90), today),
+    "Last 180 Days": (today - timedelta(days=180), today),
+    "Last 365 Days": (today - timedelta(days=365), today),
+    "Custom": None
+}
+
+col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
+
+with col1:
+    selected_preset = st.selectbox(
+        "Date Range",
+        options=list(date_presets.keys()),
+        index=0  # Default to YTD
+    )
+
+if selected_preset == "Custom":
+    with col2:
+        start_date = st.date_input("Start Date", value=ytd_start)
+    with col3:
+        end_date = st.date_input("End Date", value=today)
+else:
+    start_date, end_date = date_presets[selected_preset]
+
+with col4:
+    forecast_days = st.selectbox("Forecast", options=[7, 14, 30, 60], index=2, format_func=lambda x: f"{x}d")
+
+# Sidebar for refresh only
+with st.sidebar:
+    st.markdown("### Settings")
+    if st.button("🔄 Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
+
+st.divider()
+
+# Convert dates to strings for queries
+start_date_str = start_date.strftime('%Y-%m-%d')
+end_date_str = end_date.strftime('%Y-%m-%d')
+num_days = (end_date - start_date).days + 1
+
 # Load data
 try:
-    b2b_daily = load_b2b_daily(lookback_days)
-    b2b_weekly = load_b2b_weekly(lookback_days)
-    b2b_accounts = load_b2b_by_account(lookback_days)
-    b2c_daily = load_b2c_daily(lookback_days)
-    b2c_weekly = load_b2c_weekly(lookback_days)
-    b2c_products = load_b2c_products(lookback_days)
+    b2b_daily = load_b2b_daily(start_date_str, end_date_str)
+    b2b_weekly = load_b2b_weekly(start_date_str, end_date_str)
+    b2b_accounts = load_b2b_by_account(start_date_str, end_date_str)
+    b2c_daily = load_b2c_daily(start_date_str, end_date_str)
+    b2c_weekly = load_b2c_weekly(start_date_str, end_date_str)
+    b2c_products = load_b2c_products(start_date_str, end_date_str)
     owner_options, account_type_options = load_filter_options()
 except Exception as e:
     st.error(f"Error loading data: {e}")
@@ -474,7 +503,7 @@ with tab1:
     col1, col2, col3, col4, col5, col6 = st.columns(6)
 
     with col1:
-        st.markdown(render_kpi(format_currency(total_revenue), f"Total Revenue ({lookback_days}d)"), unsafe_allow_html=True)
+        st.markdown(render_kpi(format_currency(total_revenue), f"Total Revenue ({selected_preset})"), unsafe_allow_html=True)
     with col2:
         st.markdown(render_kpi(format_currency(b2b_total), f"B2B ({b2b_pct:.0f}%)", b2b_wow), unsafe_allow_html=True)
     with col3:
@@ -640,7 +669,7 @@ with tab3:
     col1.metric("Revenue", format_currency(b2c_total))
     col2.metric("Orders", format_number(b2c_orders))
     col3.metric("AOV", format_currency(b2c_aov))
-    col4.metric("Daily Avg", format_currency(b2c_total / lookback_days if lookback_days > 0 else 0))
+    col4.metric("Daily Avg", format_currency(b2c_total / num_days if num_days > 0 else 0))
 
     st.divider()
 
