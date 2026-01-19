@@ -535,7 +535,9 @@ with tab1:
                 b2b_weekly[['week_start', 'revenue']].rename(columns={'revenue': 'B2B'}),
                 b2c_weekly[['week_start', 'revenue']].rename(columns={'revenue': 'B2C'}),
                 on='week_start', how='outer'
-            ).fillna(0)
+            )
+            weekly_combined['B2B'] = weekly_combined['B2B'].fillna(0)
+            weekly_combined['B2C'] = weekly_combined['B2C'].fillna(0)
 
             fig = go.Figure()
             fig.add_trace(go.Bar(x=weekly_combined['week_start'], y=weekly_combined['B2B'], name='B2B', marker_color=COLORS['b2b']))
