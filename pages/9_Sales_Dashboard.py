@@ -347,7 +347,7 @@ def render_kpi(value, label, delta=None):
     if delta is not None:
         delta_class = "kpi-delta-positive" if delta >= 0 else "kpi-delta-negative"
         delta_symbol = "+" if delta >= 0 else ""
-        delta_html = f'<div class="{delta_class}">{delta_symbol}{delta:.1f}% WoW</div>'
+        delta_html = f'<div class="{delta_class}">{delta_symbol}{delta:.1f}% MoM</div>'
 
     return f"""
     <div class="kpi-card">
@@ -472,16 +472,51 @@ if not b2b_daily.empty and not b2c_daily.empty:
 forecast_df = calculate_seasonal_forecast(combined_daily, forecast_days) if not combined_daily.empty else pd.DataFrame()
 forecast_total = forecast_df['forecast_revenue'].sum() if not forecast_df.empty else 0
 
-# WoW change calculation
-if len(b2b_weekly) >= 2:
-    b2b_wow = ((b2b_weekly.iloc[-1]['revenue'] - b2b_weekly.iloc[-2]['revenue']) / b2b_weekly.iloc[-2]['revenue'] * 100) if b2b_weekly.iloc[-2]['revenue'] > 0 else 0
-else:
-    b2b_wow = None
+# MoM change calculation (day-of-month sensitive)
+# Compare current month (1st to today) vs same period last month
+current_day = today.day
+current_month_start = today.replace(day=1)
 
-if len(b2c_weekly) >= 2:
-    b2c_wow = ((b2c_weekly.iloc[-1]['revenue'] - b2c_weekly.iloc[-2]['revenue']) / b2c_weekly.iloc[-2]['revenue'] * 100) if b2c_weekly.iloc[-2]['revenue'] > 0 else 0
+# Last month same period
+if today.month == 1:
+    last_month_start = today.replace(year=today.year - 1, month=12, day=1)
+    last_month_end = today.replace(year=today.year - 1, month=12, day=min(current_day, 31))
 else:
-    b2c_wow = None
+    last_month_start = today.replace(month=today.month - 1, day=1)
+    # Handle months with fewer days
+    import calendar
+    last_month_days = calendar.monthrange(today.year, today.month - 1)[1]
+    last_month_end = today.replace(month=today.month - 1, day=min(current_day, last_month_days))
+
+# Calculate MoM for B2B
+if not b2b_daily.empty:
+    b2b_daily['order_date'] = pd.to_datetime(b2b_daily['order_date'])
+    current_month_b2b = b2b_daily[
+        (b2b_daily['order_date'] >= pd.Timestamp(current_month_start)) &
+        (b2b_daily['order_date'] <= pd.Timestamp(today))
+    ]['revenue'].sum()
+    last_month_b2b = b2b_daily[
+        (b2b_daily['order_date'] >= pd.Timestamp(last_month_start)) &
+        (b2b_daily['order_date'] <= pd.Timestamp(last_month_end))
+    ]['revenue'].sum()
+    b2b_mom = ((current_month_b2b - last_month_b2b) / last_month_b2b * 100) if last_month_b2b > 0 else None
+else:
+    b2b_mom = None
+
+# Calculate MoM for B2C
+if not b2c_daily.empty:
+    b2c_daily['order_date'] = pd.to_datetime(b2c_daily['order_date'])
+    current_month_b2c = b2c_daily[
+        (b2c_daily['order_date'] >= pd.Timestamp(current_month_start)) &
+        (b2c_daily['order_date'] <= pd.Timestamp(today))
+    ]['revenue'].sum()
+    last_month_b2c = b2c_daily[
+        (b2c_daily['order_date'] >= pd.Timestamp(last_month_start)) &
+        (b2c_daily['order_date'] <= pd.Timestamp(last_month_end))
+    ]['revenue'].sum()
+    b2c_mom = ((current_month_b2c - last_month_b2c) / last_month_b2c * 100) if last_month_b2c > 0 else None
+else:
+    b2c_mom = None
 
 
 # ============================================================================
@@ -505,9 +540,9 @@ with tab1:
     with col1:
         st.markdown(render_kpi(format_currency(total_revenue), f"Total Revenue ({selected_preset})"), unsafe_allow_html=True)
     with col2:
-        st.markdown(render_kpi(format_currency(b2b_total), f"B2B ({b2b_pct:.0f}%)", b2b_wow), unsafe_allow_html=True)
+        st.markdown(render_kpi(format_currency(b2b_total), f"B2B ({b2b_pct:.0f}%)", b2b_mom), unsafe_allow_html=True)
     with col3:
-        st.markdown(render_kpi(format_currency(b2c_total), f"B2C ({b2c_pct:.0f}%)", b2c_wow), unsafe_allow_html=True)
+        st.markdown(render_kpi(format_currency(b2c_total), f"B2C ({b2c_pct:.0f}%)", b2c_mom), unsafe_allow_html=True)
     with col4:
         st.markdown(render_kpi(format_number(total_orders), "Total Orders"), unsafe_allow_html=True)
     with col5:
