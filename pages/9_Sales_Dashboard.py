@@ -435,7 +435,9 @@ if not b2b_daily.empty and not b2c_daily.empty:
     b2b_temp = b2b_daily[['order_date', 'revenue', 'day_of_week']].copy()
     b2c_temp = b2c_daily[['order_date', 'revenue', 'day_of_week']].copy()
     combined_daily = pd.merge(b2b_temp, b2c_temp, on=['order_date', 'day_of_week'], how='outer', suffixes=('_b2b', '_b2c'))
-    combined_daily = combined_daily.fillna(0)
+    # Only fill numeric columns with 0, not datetime columns
+    combined_daily['revenue_b2b'] = combined_daily['revenue_b2b'].fillna(0)
+    combined_daily['revenue_b2c'] = combined_daily['revenue_b2c'].fillna(0)
     combined_daily['revenue'] = combined_daily['revenue_b2b'] + combined_daily['revenue_b2c']
 
 forecast_df = calculate_seasonal_forecast(combined_daily, forecast_days) if not combined_daily.empty else pd.DataFrame()
