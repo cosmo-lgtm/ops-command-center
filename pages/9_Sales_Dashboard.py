@@ -164,12 +164,12 @@ def load_b2b_weekly(start_date: str, end_date: str):
 
 @st.cache_data(ttl=300)
 def load_b2c_daily(start_date: str, end_date: str):
-    """Load B2C (Shopify) daily sales."""
+    """Load B2C (Shopify) daily gross sales."""
     return run_query(f"""
     SELECT
         DATE(created_at) as order_date,
         COUNT(DISTINCT id) as order_count,
-        ROUND(SUM(CAST(total_price AS FLOAT64)), 2) as revenue,
+        ROUND(SUM(CAST(total_line_items_price AS FLOAT64)), 2) as revenue,
         EXTRACT(DAYOFWEEK FROM created_at) as day_of_week
     FROM `artful-logic-475116-p1.raw_shopify.orders`
     WHERE cancelled_at IS NULL
@@ -183,12 +183,12 @@ def load_b2c_daily(start_date: str, end_date: str):
 
 @st.cache_data(ttl=300)
 def load_b2c_weekly(start_date: str, end_date: str):
-    """Load B2C weekly aggregation."""
+    """Load B2C weekly gross sales aggregation."""
     return run_query(f"""
     SELECT
         DATE_TRUNC(DATE(created_at), WEEK(MONDAY)) as week_start,
         COUNT(DISTINCT id) as order_count,
-        ROUND(SUM(CAST(total_price AS FLOAT64)), 2) as revenue
+        ROUND(SUM(CAST(total_line_items_price AS FLOAT64)), 2) as revenue
     FROM `artful-logic-475116-p1.raw_shopify.orders`
     WHERE cancelled_at IS NULL
         AND financial_status IN ('paid', 'partially_refunded')
