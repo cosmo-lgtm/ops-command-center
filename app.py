@@ -233,6 +233,18 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
+        st.markdown("""
+        <div class="dashboard-card">
+            <div class="card-icon">💳</div>
+            <div class="card-title">Payments</div>
+            <div class="card-description">
+                Authorize.net payment analytics - transaction volume, card types, and geographic distribution.
+                <br><br>
+                <strong>Key Metrics:</strong> Total Revenue, Avg Transaction, US/Intl Breakdown
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
     # Navigation hint
     st.markdown("""
     <div style="text-align: center; margin-top: 48px; color: #8892b0;">
