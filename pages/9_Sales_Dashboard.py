@@ -1258,11 +1258,124 @@ with tab5:
             fig.update_traces(textposition='inside', textinfo='percent+label')
             st.plotly_chart(fig, use_container_width=True)
 
-        # SKU Detail Table
+        # =====================================================================
+        # INDIVIDUAL SKU PERFORMANCE SECTION
+        # =====================================================================
         st.divider()
-        st.subheader("SKU Details")
+        st.markdown("### Individual SKU Performance")
 
-        # Aggregate to SKU level
+        # Get list of SKUs ranked by revenue
+        sku_rankings = filtered_data.groupby(['product_name', 'sku']).agg({
+            'revenue': 'sum',
+            'units': 'sum'
+        }).reset_index().sort_values('revenue', ascending=False)
+
+        # Create display names with revenue for context
+        sku_rankings['display_name'] = sku_rankings.apply(
+            lambda x: f"{x['product_name']} ({format_currency(x['revenue'])})", axis=1
+        )
+
+        # SKU multi-select (top 20 shown by default options, select up to 5)
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            sku_options = sku_rankings['product_name'].tolist()
+            default_skus = sku_options[:3] if len(sku_options) >= 3 else sku_options
+            selected_skus = st.multiselect(
+                "Select SKUs to Compare (up to 5)",
+                options=sku_options,
+                default=default_skus,
+                max_selections=5,
+                key="sku_selector"
+            )
+        with col2:
+            sku_metric = st.radio("Metric", ["Revenue", "Units"], horizontal=True, key="sku_metric")
+
+        if selected_skus:
+            # Filter to selected SKUs
+            sku_time_data = filtered_data[filtered_data['product_name'].isin(selected_skus)]
+
+            # Individual SKU Time Series
+            st.subheader(f"SKU {sku_metric} Over Time")
+
+            metric_col = 'revenue' if sku_metric == "Revenue" else 'units'
+
+            # Aggregate by date and SKU
+            sku_ts = sku_time_data.groupby(['order_date', 'product_name']).agg({
+                metric_col: 'sum'
+            }).reset_index()
+
+            if not sku_ts.empty:
+                fig = go.Figure()
+
+                for sku_name in selected_skus:
+                    sku_subset = sku_ts[sku_ts['product_name'] == sku_name]
+                    # Truncate long names for legend
+                    legend_name = sku_name[:35] + "..." if len(sku_name) > 35 else sku_name
+                    fig.add_trace(go.Scatter(
+                        x=sku_subset['order_date'],
+                        y=sku_subset[metric_col],
+                        name=legend_name,
+                        mode='lines+markers' if time_granularity == "Weekly" else 'lines',
+                        hovertemplate=f"<b>{sku_name[:30]}</b><br>" +
+                                      "%{x}<br>" +
+                                      f"{sku_metric}: %{{y:,.0f}}<extra></extra>"
+                    ))
+
+                apply_dark_theme(fig, height=400)
+                fig.update_layout(
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, font=dict(size=10)),
+                    hovermode='x unified',
+                    yaxis_title=sku_metric
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+            # SKU Comparison Cards
+            st.subheader("SKU Comparison")
+
+            # Calculate metrics for each selected SKU
+            sku_metrics = []
+            for sku_name in selected_skus:
+                sku_subset = sku_time_data[sku_time_data['product_name'] == sku_name]
+                total_rev = sku_subset['revenue'].sum()
+                total_units = sku_subset['units'].sum()
+                num_days = sku_subset['order_date'].nunique()
+                avg_daily_rev = total_rev / num_days if num_days > 0 else 0
+                avg_daily_units = total_units / num_days if num_days > 0 else 0
+
+                # Get hierarchy info
+                sku_info = filtered_data[filtered_data['product_name'] == sku_name].iloc[0] if not filtered_data[filtered_data['product_name'] == sku_name].empty else None
+
+                sku_metrics.append({
+                    'name': sku_name,
+                    'revenue': total_rev,
+                    'units': total_units,
+                    'avg_daily_rev': avg_daily_rev,
+                    'avg_daily_units': avg_daily_units,
+                    'days_with_sales': num_days,
+                    'family': sku_info['family'] if sku_info is not None else 'Unknown',
+                    'potency': sku_info['potency'] if sku_info is not None else 'Unknown',
+                    'flavor': sku_info['flavor'] if sku_info is not None else 'Unknown',
+                })
+
+            # Display as columns (up to 5)
+            cols = st.columns(len(selected_skus))
+            for i, (col, metrics) in enumerate(zip(cols, sku_metrics)):
+                with col:
+                    st.markdown(f"**{metrics['name'][:30]}{'...' if len(metrics['name']) > 30 else ''}**")
+                    st.caption(f"{metrics['family']} · {metrics['potency']} · {metrics['flavor']}")
+                    st.metric("Revenue", format_currency(metrics['revenue']))
+                    st.metric("Units", format_number(metrics['units']))
+                    st.metric("Avg Daily Rev", format_currency(metrics['avg_daily_rev']))
+                    st.metric("Days w/ Sales", format_number(metrics['days_with_sales']))
+
+        else:
+            st.info("Select SKUs above to see individual performance trends")
+
+        # SKU Rankings Table
+        st.divider()
+        st.subheader("All SKUs Ranked by Revenue")
+
+        # Aggregate to SKU level with full details
         sku_table = filtered_data.groupby(['sku', 'product_name', 'family', 'potency', 'flavor']).agg({
             'revenue': 'sum',
             'units': 'sum',
@@ -1270,11 +1383,15 @@ with tab5:
         }).reset_index().sort_values('revenue', ascending=False)
 
         if not sku_table.empty:
-            display_sku = sku_table.head(25).copy()
-            display_sku['revenue'] = display_sku['revenue'].apply(format_currency)
-            display_sku['units'] = display_sku['units'].apply(format_number)
-            display_sku.columns = ['SKU', 'Product Name', 'Family', 'Potency', 'Flavor', 'Revenue', 'Units', 'Orders']
-            st.dataframe(display_sku, hide_index=True, use_container_width=True)
+            # Add rank column
+            sku_table['rank'] = range(1, len(sku_table) + 1)
+
+            display_sku = sku_table.head(50).copy()
+            display_sku['revenue_fmt'] = display_sku['revenue'].apply(format_currency)
+            display_sku['units_fmt'] = display_sku['units'].apply(format_number)
+            display_sku = display_sku[['rank', 'product_name', 'family', 'potency', 'flavor', 'revenue_fmt', 'units_fmt', 'order_count']]
+            display_sku.columns = ['#', 'Product Name', 'Family', 'Potency', 'Flavor', 'Revenue', 'Units', 'Orders']
+            st.dataframe(display_sku, hide_index=True, use_container_width=True, height=400)
 
 
 # Footer
