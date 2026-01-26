@@ -1264,28 +1264,25 @@ with tab5:
         st.divider()
         st.markdown("### Individual SKU Performance")
 
-        # Get list of SKUs ranked by revenue
-        sku_rankings = filtered_data.groupby(['product_name', 'sku']).agg({
+        # Get list of products ranked by revenue (use product_name as primary key)
+        sku_rankings = filtered_data.groupby('product_name').agg({
             'revenue': 'sum',
             'units': 'sum'
         }).reset_index().sort_values('revenue', ascending=False)
 
-        # Create display names with revenue for context
-        sku_rankings['display_name'] = sku_rankings.apply(
-            lambda x: f"{x['product_name']} ({format_currency(x['revenue'])})", axis=1
-        )
-
-        # SKU multi-select (top 20 shown by default options, select up to 5)
+        # SKU multi-select (select up to 5)
         col1, col2 = st.columns([3, 1])
         with col1:
             sku_options = sku_rankings['product_name'].tolist()
+            # Default to top 3 SKUs if available
             default_skus = sku_options[:3] if len(sku_options) >= 3 else sku_options
             selected_skus = st.multiselect(
-                "Select SKUs to Compare (up to 5)",
+                "Select Products to Compare (up to 5)",
                 options=sku_options,
                 default=default_skus,
                 max_selections=5,
-                key="sku_selector"
+                key="sku_selector",
+                format_func=lambda x: f"{x[:50]}..." if len(x) > 50 else x
             )
         with col2:
             sku_metric = st.radio("Metric", ["Revenue", "Units"], horizontal=True, key="sku_metric")
