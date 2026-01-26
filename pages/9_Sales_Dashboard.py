@@ -260,6 +260,193 @@ def load_filter_options():
 
 
 # ============================================================================
+# SKU DATA LOADING FUNCTIONS
+# ============================================================================
+
+@st.cache_data(ttl=300)
+def load_b2b_sku_daily(start_date: str, end_date: str):
+    """Load B2B (Salesforce) daily sales by SKU with product hierarchy."""
+    return run_query(f"""
+    SELECT
+        sfo.order_date,
+        sfo.product_code as sku,
+        sfo.product_name,
+        SUM(CAST(sfo.quantity AS FLOAT64)) as units,
+        ROUND(SUM(CAST(sfo.line_total_price AS FLOAT64)), 2) as revenue,
+        COUNT(DISTINCT sfo.order_id) as order_count
+    FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
+    WHERE sfo.order_status != 'Draft'
+        AND sfo.order_date >= '{start_date}'
+        AND sfo.order_date <= '{end_date}'
+        AND sfo.product_name IS NOT NULL
+    GROUP BY sfo.order_date, sfo.product_code, sfo.product_name
+    ORDER BY sfo.order_date, revenue DESC
+    """)
+
+
+@st.cache_data(ttl=300)
+def load_b2b_sku_weekly(start_date: str, end_date: str):
+    """Load B2B weekly aggregation by SKU."""
+    return run_query(f"""
+    SELECT
+        DATE_TRUNC(order_date, WEEK(MONDAY)) as week_start,
+        product_code as sku,
+        product_name,
+        SUM(CAST(quantity AS FLOAT64)) as units,
+        ROUND(SUM(CAST(line_total_price AS FLOAT64)), 2) as revenue,
+        COUNT(DISTINCT order_id) as order_count
+    FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened`
+    WHERE order_status != 'Draft'
+        AND order_date >= '{start_date}'
+        AND order_date <= '{end_date}'
+        AND product_name IS NOT NULL
+    GROUP BY week_start, product_code, product_name
+    ORDER BY week_start, revenue DESC
+    """)
+
+
+@st.cache_data(ttl=300)
+def load_b2c_sku_daily(start_date: str, end_date: str):
+    """Load B2C (Shopify) daily sales by SKU."""
+    return run_query(f"""
+    WITH order_items AS (
+        SELECT
+            DATE(o.created_at) as order_date,
+            JSON_VALUE(item, '$.title') as product_name,
+            JSON_VALUE(item, '$.sku') as sku,
+            CAST(JSON_VALUE(item, '$.quantity') AS INT64) as quantity,
+            CAST(JSON_VALUE(item, '$.price') AS FLOAT64) as unit_price,
+            o.id as order_id
+        FROM `artful-logic-475116-p1.raw_shopify.orders` o,
+        UNNEST(JSON_QUERY_ARRAY(o.line_items)) as item
+        WHERE o.cancelled_at IS NULL
+            AND o.financial_status IN ('paid', 'partially_refunded')
+            AND DATE(o.created_at) >= '{start_date}'
+            AND DATE(o.created_at) <= '{end_date}'
+    )
+    SELECT
+        order_date,
+        sku,
+        product_name,
+        SUM(quantity) as units,
+        ROUND(SUM(quantity * unit_price), 2) as revenue,
+        COUNT(DISTINCT order_id) as order_count
+    FROM order_items
+    WHERE product_name IS NOT NULL
+        AND product_name NOT LIKE '%Shipping Protection%'
+        AND product_name NOT LIKE '%Protectly%'
+    GROUP BY order_date, sku, product_name
+    HAVING units > 0
+    ORDER BY order_date, revenue DESC
+    """)
+
+
+@st.cache_data(ttl=300)
+def load_b2c_sku_weekly(start_date: str, end_date: str):
+    """Load B2C weekly aggregation by SKU."""
+    return run_query(f"""
+    WITH order_items AS (
+        SELECT
+            DATE_TRUNC(DATE(o.created_at), WEEK(MONDAY)) as week_start,
+            JSON_VALUE(item, '$.title') as product_name,
+            JSON_VALUE(item, '$.sku') as sku,
+            CAST(JSON_VALUE(item, '$.quantity') AS INT64) as quantity,
+            CAST(JSON_VALUE(item, '$.price') AS FLOAT64) as unit_price,
+            o.id as order_id
+        FROM `artful-logic-475116-p1.raw_shopify.orders` o,
+        UNNEST(JSON_QUERY_ARRAY(o.line_items)) as item
+        WHERE o.cancelled_at IS NULL
+            AND o.financial_status IN ('paid', 'partially_refunded')
+            AND DATE(o.created_at) >= '{start_date}'
+            AND DATE(o.created_at) <= '{end_date}'
+    )
+    SELECT
+        week_start,
+        sku,
+        product_name,
+        SUM(quantity) as units,
+        ROUND(SUM(quantity * unit_price), 2) as revenue,
+        COUNT(DISTINCT order_id) as order_count
+    FROM order_items
+    WHERE product_name IS NOT NULL
+        AND product_name NOT LIKE '%Shipping Protection%'
+        AND product_name NOT LIKE '%Protectly%'
+    GROUP BY week_start, sku, product_name
+    HAVING units > 0
+    ORDER BY week_start, revenue DESC
+    """)
+
+
+def parse_product_hierarchy(product_name: str):
+    """Parse product name into family, potency, and flavor."""
+    if pd.isna(product_name):
+        return 'Other', 'Unknown', 'Unknown'
+
+    name_lower = product_name.lower()
+
+    # Parse Family (format)
+    if any(x in name_lower for x in ['shot', '2oz', '2 oz']):
+        family = 'Shots'
+    elif any(x in name_lower for x in ['750ml', '750 ml', 'bottle']):
+        family = 'Bottles'
+    elif any(x in name_lower for x in ['12oz', '12 oz']):
+        family = '12oz Seltzers'
+    elif any(x in name_lower for x in ['16oz', '16 oz']):
+        family = '16oz Seltzers'
+    elif 'seltzer' in name_lower:
+        family = 'Seltzers'
+    else:
+        family = 'Other'
+
+    # Parse Potency
+    if '25mg' in name_lower:
+        potency = '25mg'
+    elif '10mg' in name_lower:
+        potency = '10mg'
+    elif '5mg' in name_lower:
+        potency = '5mg'
+    elif '2mg' in name_lower:
+        potency = '2mg'
+    else:
+        potency = 'Unknown'
+
+    # Parse Flavor
+    flavor_map = {
+        'berry': 'Berry',
+        'citrus': 'Citrus',
+        'tropical': 'Tropical',
+        'spicy lime': 'Spicy Lime',
+        'spicylime': 'Spicy Lime',
+        'lemonade': 'Lemonade',
+        'cherry': 'Cherry',
+        'cranberry': 'Cranberry',
+        'crnbry': 'Cranberry',
+        'variety': 'Variety Pack',
+        'original': 'Original',
+    }
+
+    flavor = 'Unknown'
+    for key, val in flavor_map.items():
+        if key in name_lower:
+            flavor = val
+            break
+
+    return family, potency, flavor
+
+
+def add_product_hierarchy(df: pd.DataFrame):
+    """Add family, potency, flavor columns to dataframe."""
+    if df.empty or 'product_name' not in df.columns:
+        return df
+
+    hierarchy = df['product_name'].apply(parse_product_hierarchy)
+    df['family'] = hierarchy.apply(lambda x: x[0])
+    df['potency'] = hierarchy.apply(lambda x: x[1])
+    df['flavor'] = hierarchy.apply(lambda x: x[2])
+    return df
+
+
+# ============================================================================
 # FORECASTING
 # ============================================================================
 
@@ -523,11 +710,12 @@ else:
 # TABS
 # ============================================================================
 
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📈 Overview",
     "🏢 B2B Performance",
     "🛒 B2C Performance",
-    "🔮 Forecast"
+    "🔮 Forecast",
+    "📦 SKU Performance"
 ])
 
 # ============================================================================
@@ -840,6 +1028,253 @@ with tab4:
     - Includes trend adjustment (damped linear extrapolation)
     - B2B and B2C forecasted separately, then combined
     """)
+
+
+# ============================================================================
+# TAB 5: SKU PERFORMANCE
+# ============================================================================
+with tab5:
+    st.subheader("SKU Performance Analysis")
+    st.caption("Drill down from Family → Potency → Flavor → Individual SKUs")
+
+    # Channel selector
+    col1, col2, col3 = st.columns([1, 1, 2])
+    with col1:
+        sku_channel = st.radio("Channel", ["B2B", "B2C", "Combined"], horizontal=True, key="sku_channel")
+    with col2:
+        time_granularity = st.radio("View", ["Daily", "Weekly"], horizontal=True, key="sku_granularity")
+
+    st.divider()
+
+    # Load SKU data based on channel selection
+    try:
+        if sku_channel == "B2B":
+            if time_granularity == "Daily":
+                sku_data = load_b2b_sku_daily(start_date_str, end_date_str)
+            else:
+                sku_data = load_b2b_sku_weekly(start_date_str, end_date_str)
+                if not sku_data.empty:
+                    sku_data = sku_data.rename(columns={'week_start': 'order_date'})
+        elif sku_channel == "B2C":
+            if time_granularity == "Daily":
+                sku_data = load_b2c_sku_daily(start_date_str, end_date_str)
+            else:
+                sku_data = load_b2c_sku_weekly(start_date_str, end_date_str)
+                if not sku_data.empty:
+                    sku_data = sku_data.rename(columns={'week_start': 'order_date'})
+        else:  # Combined
+            if time_granularity == "Daily":
+                b2b_sku = load_b2b_sku_daily(start_date_str, end_date_str)
+                b2c_sku = load_b2c_sku_daily(start_date_str, end_date_str)
+            else:
+                b2b_sku = load_b2b_sku_weekly(start_date_str, end_date_str)
+                b2c_sku = load_b2c_sku_weekly(start_date_str, end_date_str)
+                if not b2b_sku.empty:
+                    b2b_sku = b2b_sku.rename(columns={'week_start': 'order_date'})
+                if not b2c_sku.empty:
+                    b2c_sku = b2c_sku.rename(columns={'week_start': 'order_date'})
+
+            if not b2b_sku.empty:
+                b2b_sku['channel'] = 'B2B'
+            if not b2c_sku.empty:
+                b2c_sku['channel'] = 'B2C'
+            sku_data = pd.concat([b2b_sku, b2c_sku], ignore_index=True) if not b2b_sku.empty or not b2c_sku.empty else pd.DataFrame()
+
+        # Add product hierarchy
+        if not sku_data.empty:
+            sku_data = add_product_hierarchy(sku_data)
+    except Exception as e:
+        st.error(f"Error loading SKU data: {e}")
+        sku_data = pd.DataFrame()
+
+    if sku_data.empty:
+        st.info("No SKU data available for the selected period")
+    else:
+        # Summary KPIs
+        total_sku_revenue = sku_data['revenue'].sum()
+        total_sku_units = sku_data['units'].sum()
+        unique_skus = sku_data['sku'].nunique()
+        unique_families = sku_data['family'].nunique()
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Total Revenue", format_currency(total_sku_revenue))
+        col2.metric("Total Units", format_number(total_sku_units))
+        col3.metric("Unique SKUs", format_number(unique_skus))
+        col4.metric("Product Families", format_number(unique_families))
+
+        st.divider()
+
+        # Hierarchical Drilldown Section
+        st.markdown("### Drilldown Filters")
+
+        # Level 1: Family
+        family_summary = sku_data.groupby('family').agg({
+            'revenue': 'sum',
+            'units': 'sum',
+            'sku': 'nunique'
+        }).reset_index().sort_values('revenue', ascending=False)
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            family_options = ['All Families'] + family_summary['family'].tolist()
+            selected_family = st.selectbox("Family (Format)", family_options, key="family_filter")
+
+        # Filter by family
+        if selected_family != 'All Families':
+            filtered_data = sku_data[sku_data['family'] == selected_family]
+        else:
+            filtered_data = sku_data
+
+        # Level 2: Potency (based on family filter)
+        with col2:
+            potency_options = ['All Potencies'] + sorted(filtered_data['potency'].unique().tolist())
+            selected_potency = st.selectbox("Potency", potency_options, key="potency_filter")
+
+        # Filter by potency
+        if selected_potency != 'All Potencies':
+            filtered_data = filtered_data[filtered_data['potency'] == selected_potency]
+
+        # Level 3: Flavor (based on family + potency filter)
+        with col3:
+            flavor_options = ['All Flavors'] + sorted(filtered_data['flavor'].unique().tolist())
+            selected_flavor = st.selectbox("Flavor", flavor_options, key="flavor_filter")
+
+        # Filter by flavor
+        if selected_flavor != 'All Flavors':
+            filtered_data = filtered_data[filtered_data['flavor'] == selected_flavor]
+
+        st.divider()
+
+        # Charts Row 1: Time Series by current drill level
+        col1, col2 = st.columns([2, 1])
+
+        with col1:
+            current_level = "SKU"
+            if selected_flavor == 'All Flavors' and selected_potency == 'All Potencies' and selected_family == 'All Families':
+                current_level = "Family"
+                group_col = 'family'
+            elif selected_flavor == 'All Flavors' and selected_potency == 'All Potencies':
+                current_level = "Potency"
+                group_col = 'potency'
+            elif selected_flavor == 'All Flavors':
+                current_level = "Flavor"
+                group_col = 'flavor'
+            else:
+                current_level = "SKU"
+                group_col = 'product_name'
+
+            st.subheader(f"Revenue Over Time by {current_level}")
+
+            # Aggregate by time and group
+            time_series = filtered_data.groupby(['order_date', group_col]).agg({
+                'revenue': 'sum'
+            }).reset_index()
+
+            if not time_series.empty:
+                # Get top groups by total revenue
+                top_groups = time_series.groupby(group_col)['revenue'].sum().nlargest(8).index.tolist()
+                time_series_top = time_series[time_series[group_col].isin(top_groups)]
+
+                fig = px.line(
+                    time_series_top,
+                    x='order_date',
+                    y='revenue',
+                    color=group_col,
+                    title=None,
+                    markers=time_granularity == "Weekly"
+                )
+                apply_dark_theme(fig, height=400)
+                fig.update_layout(
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    hovermode='x unified'
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+        with col2:
+            st.subheader(f"Revenue by {current_level}")
+
+            # Summary by group
+            group_summary = filtered_data.groupby(group_col).agg({
+                'revenue': 'sum',
+                'units': 'sum'
+            }).reset_index().sort_values('revenue', ascending=True).tail(10)
+
+            fig = px.bar(
+                group_summary,
+                x='revenue',
+                y=group_col,
+                orientation='h',
+                color_discrete_sequence=[COLORS['b2b'] if sku_channel == 'B2B' else COLORS['b2c']]
+            )
+            apply_dark_theme(fig, height=400)
+            fig.update_layout(showlegend=False, xaxis_title='Revenue', yaxis_title='')
+            st.plotly_chart(fig, use_container_width=True)
+
+        # Charts Row 2: Units trend + Mix breakdown
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.subheader(f"Units Sold Over Time")
+
+            time_series_units = filtered_data.groupby(['order_date', group_col]).agg({
+                'units': 'sum'
+            }).reset_index()
+
+            if not time_series_units.empty:
+                top_groups_units = time_series_units.groupby(group_col)['units'].sum().nlargest(8).index.tolist()
+                time_series_units_top = time_series_units[time_series_units[group_col].isin(top_groups_units)]
+
+                fig = go.Figure()
+                for grp in top_groups_units:
+                    grp_data = time_series_units_top[time_series_units_top[group_col] == grp]
+                    fig.add_trace(go.Scatter(
+                        x=grp_data['order_date'],
+                        y=grp_data['units'],
+                        name=grp[:25],
+                        mode='lines+markers' if time_granularity == "Weekly" else 'lines',
+                        stackgroup='one'
+                    ))
+                apply_dark_theme(fig, height=350)
+                fig.update_layout(
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=10)),
+                    hovermode='x unified'
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+        with col2:
+            st.subheader("Revenue Mix")
+
+            mix_data = filtered_data.groupby(group_col)['revenue'].sum().reset_index()
+            mix_data = mix_data.sort_values('revenue', ascending=False).head(8)
+
+            fig = px.pie(
+                mix_data,
+                values='revenue',
+                names=group_col,
+                hole=0.4
+            )
+            apply_dark_theme(fig, height=350)
+            fig.update_traces(textposition='inside', textinfo='percent+label')
+            st.plotly_chart(fig, use_container_width=True)
+
+        # SKU Detail Table
+        st.divider()
+        st.subheader("SKU Details")
+
+        # Aggregate to SKU level
+        sku_table = filtered_data.groupby(['sku', 'product_name', 'family', 'potency', 'flavor']).agg({
+            'revenue': 'sum',
+            'units': 'sum',
+            'order_count': 'sum'
+        }).reset_index().sort_values('revenue', ascending=False)
+
+        if not sku_table.empty:
+            display_sku = sku_table.head(25).copy()
+            display_sku['revenue'] = display_sku['revenue'].apply(format_currency)
+            display_sku['units'] = display_sku['units'].apply(format_number)
+            display_sku.columns = ['SKU', 'Product Name', 'Family', 'Potency', 'Flavor', 'Revenue', 'Units', 'Orders']
+            st.dataframe(display_sku, hide_index=True, use_container_width=True)
 
 
 # Footer
