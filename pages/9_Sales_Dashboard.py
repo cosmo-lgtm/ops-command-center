@@ -163,13 +163,14 @@ def load_b2b_weekly(start_date: str, end_date: str):
 
 
 @st.cache_data(ttl=300)
-def load_b2c_daily(start_date: str, end_date: str):
-    """Load B2C (Shopify) daily gross sales."""
+def load_b2c_daily(start_date: str, end_date: str, net_revenue: bool = False):
+    """Load B2C (Shopify) daily sales. Net uses current_subtotal_price (after discounts & refunds)."""
+    revenue_col = "current_subtotal_price" if net_revenue else "total_line_items_price"
     return run_query(f"""
     SELECT
         DATE(created_at) as order_date,
         COUNT(DISTINCT id) as order_count,
-        ROUND(SUM(CAST(total_line_items_price AS FLOAT64)), 2) as revenue,
+        ROUND(SUM(CAST({revenue_col} AS FLOAT64)), 2) as revenue,
         EXTRACT(DAYOFWEEK FROM created_at) as day_of_week
     FROM `artful-logic-475116-p1.raw_shopify.orders`
     WHERE cancelled_at IS NULL
@@ -182,13 +183,14 @@ def load_b2c_daily(start_date: str, end_date: str):
 
 
 @st.cache_data(ttl=300)
-def load_b2c_weekly(start_date: str, end_date: str):
-    """Load B2C weekly gross sales aggregation."""
+def load_b2c_weekly(start_date: str, end_date: str, net_revenue: bool = False):
+    """Load B2C weekly sales aggregation. Net uses current_subtotal_price."""
+    revenue_col = "current_subtotal_price" if net_revenue else "total_line_items_price"
     return run_query(f"""
     SELECT
         DATE_TRUNC(DATE(created_at), WEEK(MONDAY)) as week_start,
         COUNT(DISTINCT id) as order_count,
-        ROUND(SUM(CAST(total_line_items_price AS FLOAT64)), 2) as revenue
+        ROUND(SUM(CAST({revenue_col} AS FLOAT64)), 2) as revenue
     FROM `artful-logic-475116-p1.raw_shopify.orders`
     WHERE cancelled_at IS NULL
         AND financial_status IN ('paid', 'partially_refunded')
@@ -200,39 +202,74 @@ def load_b2c_weekly(start_date: str, end_date: str):
 
 
 @st.cache_data(ttl=300)
-def load_b2c_products(start_date: str, end_date: str):
-    """Load B2C product performance."""
-    return run_query(f"""
-    WITH order_items AS (
+def load_b2c_products(start_date: str, end_date: str, net_revenue: bool = False):
+    """Load B2C product performance. Net subtracts line-item discount allocations."""
+    if net_revenue:
+        # Use discount_allocations from each line item for accurate per-product net
+        return run_query(f"""
+        WITH order_items AS (
+            SELECT
+                o.id as order_id,
+                DATE(o.created_at) as order_date,
+                JSON_VALUE(item, '$.title') as product_name,
+                JSON_VALUE(item, '$.sku') as sku,
+                CAST(JSON_VALUE(item, '$.quantity') AS INT64) as quantity,
+                CAST(JSON_VALUE(item, '$.price') AS FLOAT64) as unit_price,
+                COALESCE(SAFE_CAST(JSON_VALUE(item, '$.total_discount') AS FLOAT64), 0) as line_discount
+            FROM `artful-logic-475116-p1.raw_shopify.orders` o,
+            UNNEST(JSON_QUERY_ARRAY(o.line_items)) as item
+            WHERE o.cancelled_at IS NULL
+                AND o.financial_status IN ('paid', 'partially_refunded')
+                AND DATE(o.created_at) >= '{start_date}'
+                AND DATE(o.created_at) <= '{end_date}'
+        )
         SELECT
-            o.id as order_id,
-            DATE(o.created_at) as order_date,
-            JSON_VALUE(item, '$.title') as product_name,
-            JSON_VALUE(item, '$.sku') as sku,
-            CAST(JSON_VALUE(item, '$.quantity') AS INT64) as quantity,
-            CAST(JSON_VALUE(item, '$.price') AS FLOAT64) as unit_price
-        FROM `artful-logic-475116-p1.raw_shopify.orders` o,
-        UNNEST(JSON_QUERY_ARRAY(o.line_items)) as item
-        WHERE o.cancelled_at IS NULL
-            AND o.financial_status IN ('paid', 'partially_refunded')
-            AND DATE(o.created_at) >= '{start_date}'
-            AND DATE(o.created_at) <= '{end_date}'
-    )
-    SELECT
-        product_name,
-        sku,
-        SUM(quantity) as units_sold,
-        ROUND(SUM(quantity * unit_price), 2) as revenue,
-        COUNT(DISTINCT order_id) as order_count,
-        ROUND(AVG(unit_price), 2) as avg_price
-    FROM order_items
-    WHERE product_name IS NOT NULL
-        AND product_name NOT LIKE '%Shipping Protection%'
-        AND product_name NOT LIKE '%Protectly%'
-    GROUP BY product_name, sku
-    HAVING units_sold > 0
-    ORDER BY revenue DESC
-    """)
+            product_name,
+            sku,
+            SUM(quantity) as units_sold,
+            ROUND(SUM(quantity * unit_price - line_discount), 2) as revenue,
+            COUNT(DISTINCT order_id) as order_count,
+            ROUND(AVG(unit_price), 2) as avg_price
+        FROM order_items
+        WHERE product_name IS NOT NULL
+            AND product_name NOT LIKE '%Shipping Protection%'
+            AND product_name NOT LIKE '%Protectly%'
+        GROUP BY product_name, sku
+        HAVING units_sold > 0
+        ORDER BY revenue DESC
+        """)
+    else:
+        return run_query(f"""
+        WITH order_items AS (
+            SELECT
+                o.id as order_id,
+                DATE(o.created_at) as order_date,
+                JSON_VALUE(item, '$.title') as product_name,
+                JSON_VALUE(item, '$.sku') as sku,
+                CAST(JSON_VALUE(item, '$.quantity') AS INT64) as quantity,
+                CAST(JSON_VALUE(item, '$.price') AS FLOAT64) as unit_price
+            FROM `artful-logic-475116-p1.raw_shopify.orders` o,
+            UNNEST(JSON_QUERY_ARRAY(o.line_items)) as item
+            WHERE o.cancelled_at IS NULL
+                AND o.financial_status IN ('paid', 'partially_refunded')
+                AND DATE(o.created_at) >= '{start_date}'
+                AND DATE(o.created_at) <= '{end_date}'
+        )
+        SELECT
+            product_name,
+            sku,
+            SUM(quantity) as units_sold,
+            ROUND(SUM(quantity * unit_price), 2) as revenue,
+            COUNT(DISTINCT order_id) as order_count,
+            ROUND(AVG(unit_price), 2) as avg_price
+        FROM order_items
+        WHERE product_name IS NOT NULL
+            AND product_name NOT LIKE '%Shipping Protection%'
+            AND product_name NOT LIKE '%Protectly%'
+        GROUP BY product_name, sku
+        HAVING units_sold > 0
+        ORDER BY revenue DESC
+        """)
 
 
 @st.cache_data(ttl=300)
@@ -257,6 +294,89 @@ def load_filter_options():
     """)
 
     return owners['owner_name'].tolist(), account_types['account_type'].tolist()
+
+
+# ============================================================================
+# QB CREDIT MEMO FUNCTIONS (for Net Revenue)
+# ============================================================================
+
+@st.cache_data(ttl=300)
+def load_qb_credits_daily(start_date: str, end_date: str):
+    """Load QB credit memos (refunds + discounts only) aggregated by day."""
+    return run_query(f"""
+    WITH cm_lines AS (
+        SELECT
+            cm.TxnDate as credit_date,
+            SAFE_CAST(JSON_VALUE(line, '$.Amount') AS FLOAT64) as line_amount
+        FROM `artful-logic-475116-p1.raw_quickbooks.credit_memos` cm,
+        UNNEST(JSON_QUERY_ARRAY(cm.Line)) as line
+        WHERE JSON_VALUE(line, '$.DetailType') = 'SalesItemLineDetail'
+            AND (
+                JSON_VALUE(line, '$.SalesItemLineDetail.ItemAccountRef.name') LIKE '%:Refunds'
+                OR JSON_VALUE(line, '$.SalesItemLineDetail.ItemAccountRef.name') LIKE '%:Discounts'
+            )
+            AND cm.TxnDate >= '{start_date}'
+            AND cm.TxnDate <= '{end_date}'
+    )
+    SELECT
+        credit_date,
+        ROUND(SUM(line_amount), 2) as credit_amount
+    FROM cm_lines
+    WHERE line_amount IS NOT NULL
+    GROUP BY credit_date
+    ORDER BY credit_date
+    """)
+
+
+@st.cache_data(ttl=300)
+def load_qb_credits_weekly(start_date: str, end_date: str):
+    """Load QB credit memos (refunds + discounts only) aggregated by week."""
+    return run_query(f"""
+    WITH cm_lines AS (
+        SELECT
+            DATE_TRUNC(cm.TxnDate, WEEK(MONDAY)) as week_start,
+            SAFE_CAST(JSON_VALUE(line, '$.Amount') AS FLOAT64) as line_amount
+        FROM `artful-logic-475116-p1.raw_quickbooks.credit_memos` cm,
+        UNNEST(JSON_QUERY_ARRAY(cm.Line)) as line
+        WHERE JSON_VALUE(line, '$.DetailType') = 'SalesItemLineDetail'
+            AND (
+                JSON_VALUE(line, '$.SalesItemLineDetail.ItemAccountRef.name') LIKE '%:Refunds'
+                OR JSON_VALUE(line, '$.SalesItemLineDetail.ItemAccountRef.name') LIKE '%:Discounts'
+            )
+            AND cm.TxnDate >= '{start_date}'
+            AND cm.TxnDate <= '{end_date}'
+    )
+    SELECT
+        week_start,
+        ROUND(SUM(line_amount), 2) as credit_amount
+    FROM cm_lines
+    WHERE line_amount IS NOT NULL
+    GROUP BY week_start
+    ORDER BY week_start
+    """)
+
+
+@st.cache_data(ttl=300)
+def load_qb_credits_total(start_date: str, end_date: str):
+    """Load total QB credit memos (refunds + discounts only) for the period."""
+    return run_query(f"""
+    WITH cm_lines AS (
+        SELECT
+            SAFE_CAST(JSON_VALUE(line, '$.Amount') AS FLOAT64) as line_amount
+        FROM `artful-logic-475116-p1.raw_quickbooks.credit_memos` cm,
+        UNNEST(JSON_QUERY_ARRAY(cm.Line)) as line
+        WHERE JSON_VALUE(line, '$.DetailType') = 'SalesItemLineDetail'
+            AND (
+                JSON_VALUE(line, '$.SalesItemLineDetail.ItemAccountRef.name') LIKE '%:Refunds'
+                OR JSON_VALUE(line, '$.SalesItemLineDetail.ItemAccountRef.name') LIKE '%:Discounts'
+            )
+            AND cm.TxnDate >= '{start_date}'
+            AND cm.TxnDate <= '{end_date}'
+    )
+    SELECT ROUND(SUM(line_amount), 2) as total_credits
+    FROM cm_lines
+    WHERE line_amount IS NOT NULL
+    """)
 
 
 # ============================================================================
@@ -306,8 +426,9 @@ def load_b2b_sku_weekly(start_date: str, end_date: str):
 
 
 @st.cache_data(ttl=300)
-def load_b2c_sku_daily(start_date: str, end_date: str):
-    """Load B2C (Shopify) daily sales by SKU."""
+def load_b2c_sku_daily(start_date: str, end_date: str, net_revenue: bool = False):
+    """Load B2C (Shopify) daily sales by SKU. Net subtracts line-item discounts."""
+    discount_col = "COALESCE(SAFE_CAST(JSON_VALUE(item, '$.total_discount') AS FLOAT64), 0)" if net_revenue else "0"
     return run_query(f"""
     WITH order_items AS (
         SELECT
@@ -316,6 +437,7 @@ def load_b2c_sku_daily(start_date: str, end_date: str):
             JSON_VALUE(item, '$.sku') as sku,
             CAST(JSON_VALUE(item, '$.quantity') AS INT64) as quantity,
             CAST(JSON_VALUE(item, '$.price') AS FLOAT64) as unit_price,
+            {discount_col} as line_discount,
             o.id as order_id
         FROM `artful-logic-475116-p1.raw_shopify.orders` o,
         UNNEST(JSON_QUERY_ARRAY(o.line_items)) as item
@@ -329,7 +451,7 @@ def load_b2c_sku_daily(start_date: str, end_date: str):
         sku,
         product_name,
         SUM(quantity) as units,
-        ROUND(SUM(quantity * unit_price), 2) as revenue,
+        ROUND(SUM(quantity * unit_price - line_discount), 2) as revenue,
         COUNT(DISTINCT order_id) as order_count
     FROM order_items
     WHERE product_name IS NOT NULL
@@ -342,8 +464,9 @@ def load_b2c_sku_daily(start_date: str, end_date: str):
 
 
 @st.cache_data(ttl=300)
-def load_b2c_sku_weekly(start_date: str, end_date: str):
-    """Load B2C weekly aggregation by SKU."""
+def load_b2c_sku_weekly(start_date: str, end_date: str, net_revenue: bool = False):
+    """Load B2C weekly aggregation by SKU. Net subtracts line-item discounts."""
+    discount_col = "COALESCE(SAFE_CAST(JSON_VALUE(item, '$.total_discount') AS FLOAT64), 0)" if net_revenue else "0"
     return run_query(f"""
     WITH order_items AS (
         SELECT
@@ -352,6 +475,7 @@ def load_b2c_sku_weekly(start_date: str, end_date: str):
             JSON_VALUE(item, '$.sku') as sku,
             CAST(JSON_VALUE(item, '$.quantity') AS INT64) as quantity,
             CAST(JSON_VALUE(item, '$.price') AS FLOAT64) as unit_price,
+            {discount_col} as line_discount,
             o.id as order_id
         FROM `artful-logic-475116-p1.raw_shopify.orders` o,
         UNNEST(JSON_QUERY_ARRAY(o.line_items)) as item
@@ -365,7 +489,7 @@ def load_b2c_sku_weekly(start_date: str, end_date: str):
         sku,
         product_name,
         SUM(quantity) as units,
-        ROUND(SUM(quantity * unit_price), 2) as revenue,
+        ROUND(SUM(quantity * unit_price - line_discount), 2) as revenue,
         COUNT(DISTINCT order_id) as order_count
     FROM order_items
     WHERE product_name IS NOT NULL
@@ -569,7 +693,7 @@ def apply_dark_theme(fig, height=350):
 # ============================================================================
 
 st.title("📊 Sales Dashboard")
-st.caption("Combined B2B (Salesforce) + B2C (Shopify) Revenue")
+st.caption("Combined B2B (Salesforce) + B2C (Shopify) | Toggle Gross/Net in top bar")
 
 # Date range selector at top of page
 today = datetime.now().date()
@@ -586,7 +710,7 @@ date_presets = {
     "Custom": None
 }
 
-col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
+col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 1, 1])
 
 with col1:
     selected_preset = st.selectbox(
@@ -606,6 +730,10 @@ else:
 with col4:
     forecast_days = st.selectbox("Forecast", options=[7, 14, 30, 60], index=2, format_func=lambda x: f"{x}d")
 
+with col5:
+    revenue_mode = st.selectbox("Revenue", options=["Net", "Gross"], index=0,
+                                help="Net = after refunds & discounts. Gross = before adjustments.")
+
 # Sidebar for refresh only
 with st.sidebar:
     st.markdown("### Settings")
@@ -620,15 +748,46 @@ start_date_str = start_date.strftime('%Y-%m-%d')
 end_date_str = end_date.strftime('%Y-%m-%d')
 num_days = (end_date - start_date).days + 1
 
+is_net = revenue_mode == "Net"
+revenue_label = "Net Revenue" if is_net else "Gross Revenue"
+
 # Load data
 try:
     b2b_daily = load_b2b_daily(start_date_str, end_date_str)
     b2b_weekly = load_b2b_weekly(start_date_str, end_date_str)
     b2b_accounts = load_b2b_by_account(start_date_str, end_date_str)
-    b2c_daily = load_b2c_daily(start_date_str, end_date_str)
-    b2c_weekly = load_b2c_weekly(start_date_str, end_date_str)
-    b2c_products = load_b2c_products(start_date_str, end_date_str)
+    b2c_daily = load_b2c_daily(start_date_str, end_date_str, net_revenue=is_net)
+    b2c_weekly = load_b2c_weekly(start_date_str, end_date_str, net_revenue=is_net)
+    b2c_products = load_b2c_products(start_date_str, end_date_str, net_revenue=is_net)
     owner_options, account_type_options = load_filter_options()
+
+    # Apply B2B net revenue: subtract QB credit memos (refunds + discounts)
+    if is_net:
+        qb_credits_daily = load_qb_credits_daily(start_date_str, end_date_str)
+        qb_credits_weekly = load_qb_credits_weekly(start_date_str, end_date_str)
+        qb_credits_total_df = load_qb_credits_total(start_date_str, end_date_str)
+        b2b_total_credits = qb_credits_total_df['total_credits'].iloc[0] if not qb_credits_total_df.empty and qb_credits_total_df['total_credits'].iloc[0] else 0
+
+        # Subtract daily credits from B2B daily revenue
+        if not b2b_daily.empty and not qb_credits_daily.empty:
+            qb_credits_daily['credit_date'] = pd.to_datetime(qb_credits_daily['credit_date'])
+            b2b_daily['order_date'] = pd.to_datetime(b2b_daily['order_date'])
+            b2b_daily = b2b_daily.merge(qb_credits_daily, left_on='order_date', right_on='credit_date', how='left')
+            b2b_daily['credit_amount'] = b2b_daily['credit_amount'].fillna(0)
+            b2b_daily['revenue'] = b2b_daily['revenue'] - b2b_daily['credit_amount']
+            b2b_daily = b2b_daily.drop(columns=['credit_date', 'credit_amount'], errors='ignore')
+
+        # Subtract weekly credits from B2B weekly revenue
+        if not b2b_weekly.empty and not qb_credits_weekly.empty:
+            qb_credits_weekly['week_start'] = pd.to_datetime(qb_credits_weekly['week_start'])
+            b2b_weekly['week_start'] = pd.to_datetime(b2b_weekly['week_start'])
+            b2b_weekly = b2b_weekly.merge(qb_credits_weekly, on='week_start', how='left')
+            b2b_weekly['credit_amount'] = b2b_weekly['credit_amount'].fillna(0)
+            b2b_weekly['revenue'] = b2b_weekly['revenue'] - b2b_weekly['credit_amount']
+            b2b_weekly = b2b_weekly.drop(columns=['credit_amount'], errors='ignore')
+    else:
+        b2b_total_credits = 0
+
 except Exception as e:
     st.error(f"Error loading data: {e}")
     st.stop()
@@ -726,11 +885,11 @@ with tab1:
     col1, col2, col3, col4, col5, col6 = st.columns(6)
 
     with col1:
-        st.markdown(render_kpi(format_currency(total_revenue), f"Total Revenue ({selected_preset})"), unsafe_allow_html=True)
+        st.markdown(render_kpi(format_currency(total_revenue), f"Total {revenue_label} ({selected_preset})"), unsafe_allow_html=True)
     with col2:
-        st.markdown(render_kpi(format_currency(b2b_total), f"B2B ({b2b_pct:.0f}%)", b2b_mom), unsafe_allow_html=True)
+        st.markdown(render_kpi(format_currency(b2b_total), f"B2B {revenue_label} ({b2b_pct:.0f}%)", b2b_mom), unsafe_allow_html=True)
     with col3:
-        st.markdown(render_kpi(format_currency(b2c_total), f"B2C ({b2c_pct:.0f}%)", b2c_mom), unsafe_allow_html=True)
+        st.markdown(render_kpi(format_currency(b2c_total), f"B2C {revenue_label} ({b2c_pct:.0f}%)", b2c_mom), unsafe_allow_html=True)
     with col4:
         st.markdown(render_kpi(format_number(total_orders), "Total Orders"), unsafe_allow_html=True)
     with col5:
@@ -742,7 +901,7 @@ with tab1:
     st.divider()
 
     # Charts Row 1: Stacked Revenue Trend
-    st.subheader("Daily Revenue by Channel")
+    st.subheader(f"Daily {revenue_label} by Channel")
 
     if not combined_daily.empty:
         fig = go.Figure()
@@ -779,7 +938,7 @@ with tab1:
     col1, col2 = st.columns([2, 1])
 
     with col1:
-        st.subheader("Weekly Revenue by Channel")
+        st.subheader(f"Weekly {revenue_label} by Channel")
 
         if not b2b_weekly.empty or not b2c_weekly.empty:
             # Merge weekly data
@@ -840,10 +999,13 @@ with tab2:
     filtered_accounts_count = len(filtered_accounts)
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Revenue", format_currency(filtered_revenue))
+    col1.metric("Revenue (Gross)", format_currency(filtered_revenue))
     col2.metric("Orders", format_number(filtered_orders))
     col3.metric("Accounts", format_number(filtered_accounts_count))
     col4.metric("Avg Order Value", format_currency(filtered_revenue / filtered_orders if filtered_orders > 0 else 0))
+
+    if is_net:
+        st.caption("Note: Account-level breakdown shows gross revenue. Net adjustments (QB credit memos) are applied at aggregate level.")
 
     st.divider()
 
@@ -870,7 +1032,7 @@ with tab2:
         st.plotly_chart(fig, use_container_width=True)
 
     # Weekly B2B Trend
-    st.subheader("Weekly B2B Revenue")
+    st.subheader(f"Weekly B2B {revenue_label}")
     if not b2b_weekly.empty:
         fig = go.Figure()
         fig.add_trace(go.Bar(x=b2b_weekly['week_start'], y=b2b_weekly['revenue'],
@@ -1046,6 +1208,9 @@ with tab5:
 
     st.divider()
 
+    if is_net:
+        st.caption("B2C SKU revenue is net of line-item discounts. B2B SKU revenue is gross (credit memos cannot be allocated to individual SKUs).")
+
     # Load SKU data based on channel selection
     try:
         if sku_channel == "B2B":
@@ -1057,18 +1222,18 @@ with tab5:
                     sku_data = sku_data.rename(columns={'week_start': 'order_date'})
         elif sku_channel == "B2C":
             if time_granularity == "Daily":
-                sku_data = load_b2c_sku_daily(start_date_str, end_date_str)
+                sku_data = load_b2c_sku_daily(start_date_str, end_date_str, net_revenue=is_net)
             else:
-                sku_data = load_b2c_sku_weekly(start_date_str, end_date_str)
+                sku_data = load_b2c_sku_weekly(start_date_str, end_date_str, net_revenue=is_net)
                 if not sku_data.empty:
                     sku_data = sku_data.rename(columns={'week_start': 'order_date'})
         else:  # Combined
             if time_granularity == "Daily":
                 b2b_sku = load_b2b_sku_daily(start_date_str, end_date_str)
-                b2c_sku = load_b2c_sku_daily(start_date_str, end_date_str)
+                b2c_sku = load_b2c_sku_daily(start_date_str, end_date_str, net_revenue=is_net)
             else:
                 b2b_sku = load_b2b_sku_weekly(start_date_str, end_date_str)
-                b2c_sku = load_b2c_sku_weekly(start_date_str, end_date_str)
+                b2c_sku = load_b2c_sku_weekly(start_date_str, end_date_str, net_revenue=is_net)
                 if not b2b_sku.empty:
                     b2b_sku = b2b_sku.rename(columns={'week_start': 'order_date'})
                 if not b2c_sku.empty:
@@ -1393,4 +1558,5 @@ with tab5:
 
 # Footer
 st.divider()
-st.caption(f"Last refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M')} | Data: Salesforce + Shopify")
+net_note = " | B2B net = SF orders minus QB refunds & discounts | B2C net = after Shopify discounts & refunds" if is_net else ""
+st.caption(f"Last refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M')} | Mode: {revenue_label} | Data: Salesforce + Shopify + QuickBooks{net_note}")
