@@ -809,6 +809,8 @@ combined_daily = pd.DataFrame()
 if not b2b_daily.empty and not b2c_daily.empty:
     b2b_temp = b2b_daily[['order_date', 'revenue', 'day_of_week']].copy()
     b2c_temp = b2c_daily[['order_date', 'revenue', 'day_of_week']].copy()
+    b2b_temp['order_date'] = pd.to_datetime(b2b_temp['order_date'])
+    b2c_temp['order_date'] = pd.to_datetime(b2c_temp['order_date'])
     combined_daily = pd.merge(b2b_temp, b2c_temp, on=['order_date', 'day_of_week'], how='outer', suffixes=('_b2b', '_b2c'))
     # Only fill numeric columns with 0, not datetime columns
     combined_daily['revenue_b2b'] = combined_daily['revenue_b2b'].fillna(0)
