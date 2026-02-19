@@ -943,6 +943,11 @@ with tab1:
         st.subheader(f"Weekly {revenue_label} by Channel")
 
         if not b2b_weekly.empty or not b2c_weekly.empty:
+            # Ensure consistent dtype before merge
+            if not b2b_weekly.empty:
+                b2b_weekly['week_start'] = pd.to_datetime(b2b_weekly['week_start'])
+            if not b2c_weekly.empty:
+                b2c_weekly['week_start'] = pd.to_datetime(b2c_weekly['week_start'])
             # Merge weekly data
             weekly_combined = pd.merge(
                 b2b_weekly[['week_start', 'revenue']].rename(columns={'revenue': 'B2B'}),
