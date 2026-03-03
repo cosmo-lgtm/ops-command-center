@@ -1,5 +1,5 @@
 """
-Executive Summary Dashboard
+Marketing Scorecard Dashboard
 Weekly KPI scorecard for sales leadership meetings.
 Automates Retail Revenue, DTC Revenue, Active Doors, LinkedIn & Instagram followers.
 Manual metrics (rebates, influencer posts, events) pulled from Google Sheet.
@@ -18,7 +18,7 @@ import json
 
 # Page config
 st.set_page_config(
-    page_title="Executive Summary",
+    page_title="Marketing Scorecard",
     page_icon="📋",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -443,7 +443,7 @@ def main():
     st.markdown("""
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
         <div>
-            <h1 style="color: #ccd6f6; font-size: 32px; font-weight: 700; margin: 0;">Executive Summary</h1>
+            <h1 style="color: #ccd6f6; font-size: 32px; font-weight: 700; margin: 0;">Marketing Scorecard</h1>
             <p style="color: #8892b0; font-size: 14px; margin: 4px 0 0 0;">Q1 2026 KPI Scorecard</p>
         </div>
         <div style="color: #8892b0; font-size: 12px; text-align: right;">
