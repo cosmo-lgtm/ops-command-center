@@ -268,29 +268,25 @@ def load_active_door_count() -> int:
     return int(df['active_doors'].iloc[0]) if not df.empty else 0
 
 
+
 @st.cache_data(ttl=3600)
 def scrape_linkedin_followers() -> int | None:
-    """Scrape LinkedIn company page for follower count."""
+    """Scrape LinkedIn follower count from og:description meta tag."""
     try:
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
         }
-        resp = requests.get('https://www.linkedin.com/company/trynowadays/', headers=headers, timeout=10)
-        if resp.status_code != 200:
-            return None
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        # LinkedIn embeds follower count in meta description or page content
-        # Try meta description first
-        meta = soup.find('meta', {'name': 'description'})
-        if meta and meta.get('content'):
-            match = re.search(r'([\d,]+)\s+followers', meta['content'])
+        resp = requests.get(
+            "https://www.linkedin.com/company/getnowadays/",
+            headers=headers, timeout=15, allow_redirects=True,
+        )
+        if resp.status_code == 200:
+            match = re.search(
+                r'content="[^"]*?([\d,]+)\s+followers?\s+on\s+LinkedIn',
+                resp.text, re.IGNORECASE,
+            )
             if match:
-                return int(match.group(1).replace(',', ''))
-        # Try page content
-        text = soup.get_text()
-        match = re.search(r'([\d,]+)\s+followers', text)
-        if match:
-            return int(match.group(1).replace(',', ''))
+                return int(match.group(1).replace(",", ""))
     except Exception:
         pass
     return None
@@ -298,36 +294,33 @@ def scrape_linkedin_followers() -> int | None:
 
 @st.cache_data(ttl=3600)
 def scrape_instagram_followers() -> int | None:
-    """Scrape Instagram profile for follower count."""
+    """Scrape Instagram follower count from og:description meta tag."""
     try:
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
         }
-        resp = requests.get('https://www.instagram.com/trynowadays/', headers=headers, timeout=10)
-        if resp.status_code != 200:
-            return None
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        # Instagram puts follower count in og:description meta tag
-        meta = soup.find('meta', {'property': 'og:description'})
-        if meta and meta.get('content'):
-            match = re.search(r'([\d,.]+[KMkm]?)\s+Followers', meta['content'])
+        resp = requests.get(
+            "https://www.instagram.com/trynowadays/",
+            headers=headers, timeout=15, allow_redirects=True,
+        )
+        if resp.status_code == 200:
+            match = re.search(
+                r'([\d,.]+[KMB]?)\s+Followers',
+                resp.text, re.IGNORECASE,
+            )
             if match:
-                raw = match.group(1).replace(',', '')
-                if raw.upper().endswith('K'):
-                    return int(float(raw[:-1]) * 1000)
-                elif raw.upper().endswith('M'):
-                    return int(float(raw[:-1]) * 1000000)
-                return int(float(raw))
-        # Try JSON-LD
-        for script in soup.find_all('script', type='application/ld+json'):
-            try:
-                data = json.loads(script.string)
-                if isinstance(data, dict) and 'mainEntityofPage' in data:
-                    interaction = data.get('interactionStatistic', {})
-                    if isinstance(interaction, dict):
-                        return int(interaction.get('userInteractionCount', 0))
-            except (json.JSONDecodeError, ValueError):
-                continue
+                raw = match.group(1).replace(",", "")
+                multiplier = 1
+                if raw.upper().endswith("K"):
+                    multiplier = 1_000
+                    raw = raw[:-1]
+                elif raw.upper().endswith("M"):
+                    multiplier = 1_000_000
+                    raw = raw[:-1]
+                elif raw.upper().endswith("B"):
+                    multiplier = 1_000_000_000
+                    raw = raw[:-1]
+                return int(float(raw) * multiplier)
     except Exception:
         pass
     return None
