@@ -265,18 +265,21 @@ def load_visit_attribution(days_back=30, attribution_window=30, rep_name=None, _
     ),
     account_vip_map AS (
         SELECT DISTINCT
-            sfdc_account_id,
-            vip_account_code,
-            primary_distributor_code as distributor_code
-        FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_v2`
-        WHERE sfdc_account_id IS NOT NULL
+            r.sf_account_id as sfdc_account_id,
+            o.Account as vip_account_code,
+            r.primary_distributor_code as distributor_code
+        FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_2026` r
+        JOIN `artful-logic-475116-p1.raw_vip.retail_outlets` o
+            ON r.vip_id = CAST(o.VipId AS STRING)
+            AND r.primary_distributor_code = CAST(o.DistId AS STRING)
+        WHERE r.sf_account_id IS NOT NULL
     ),
     -- Volume by product BEFORE visit (30d lookback)
     volume_before AS (
         SELECT
             v.task_id,
             s.product_code,
-            SUM(s.quantity) as units_before
+            SUM(s.case_equivalent_qty) as units_before
         FROM visits v
         JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
         JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
@@ -291,7 +294,7 @@ def load_visit_attribution(days_back=30, attribution_window=30, rep_name=None, _
         SELECT
             v.task_id,
             s.product_code,
-            SUM(s.quantity) as units_after
+            SUM(s.case_equivalent_qty) as units_after
         FROM visits v
         JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
         JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
@@ -376,11 +379,14 @@ def load_rep_performance(days_back=30, attribution_window=30, _cache_version=CAC
     ),
     account_vip_map AS (
         SELECT DISTINCT
-            sfdc_account_id,
-            vip_account_code,
-            primary_distributor_code as distributor_code
-        FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_v2`
-        WHERE sfdc_account_id IS NOT NULL
+            r.sf_account_id as sfdc_account_id,
+            o.Account as vip_account_code,
+            r.primary_distributor_code as distributor_code
+        FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_2026` r
+        JOIN `artful-logic-475116-p1.raw_vip.retail_outlets` o
+            ON r.vip_id = CAST(o.VipId AS STRING)
+            AND r.primary_distributor_code = CAST(o.DistId AS STRING)
+        WHERE r.sf_account_id IS NOT NULL
     ),
     -- Volume by product BEFORE visit (30d lookback)
     volume_before AS (
@@ -388,7 +394,7 @@ def load_rep_performance(days_back=30, attribution_window=30, _cache_version=CAC
             v.task_id,
             v.rep_id,
             s.product_code,
-            SUM(s.quantity) as units_before
+            SUM(s.case_equivalent_qty) as units_before
         FROM visits v
         JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
         JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
@@ -404,7 +410,7 @@ def load_rep_performance(days_back=30, attribution_window=30, _cache_version=CAC
             v.task_id,
             v.rep_id,
             s.product_code,
-            SUM(s.quantity) as units_after
+            SUM(s.case_equivalent_qty) as units_after
         FROM visits v
         JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
         JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
@@ -526,11 +532,14 @@ def load_pod_growth(days_back=60, attribution_window=30, _cache_version=CACHE_VE
     ),
     account_vip_map AS (
         SELECT DISTINCT
-            sfdc_account_id,
-            vip_account_code,
-            primary_distributor_code as distributor_code
-        FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_v2`
-        WHERE sfdc_account_id IS NOT NULL
+            r.sf_account_id as sfdc_account_id,
+            o.Account as vip_account_code,
+            r.primary_distributor_code as distributor_code
+        FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_2026` r
+        JOIN `artful-logic-475116-p1.raw_vip.retail_outlets` o
+            ON r.vip_id = CAST(o.VipId AS STRING)
+            AND r.primary_distributor_code = CAST(o.DistId AS STRING)
+        WHERE r.sf_account_id IS NOT NULL
     ),
     -- Products bought BEFORE visit
     pods_before AS (
@@ -616,18 +625,21 @@ def load_weekly_trend(weeks_back=12, _cache_version=CACHE_VERSION):
     ),
     account_vip_map AS (
         SELECT DISTINCT
-            sfdc_account_id,
-            vip_account_code,
-            primary_distributor_code as distributor_code
-        FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_v2`
-        WHERE sfdc_account_id IS NOT NULL
+            r.sf_account_id as sfdc_account_id,
+            o.Account as vip_account_code,
+            r.primary_distributor_code as distributor_code
+        FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_2026` r
+        JOIN `artful-logic-475116-p1.raw_vip.retail_outlets` o
+            ON r.vip_id = CAST(o.VipId AS STRING)
+            AND r.primary_distributor_code = CAST(o.DistId AS STRING)
+        WHERE r.sf_account_id IS NOT NULL
     ),
     -- Volume by product BEFORE visit
     volume_before AS (
         SELECT
             v.task_id,
             s.product_code,
-            SUM(s.quantity) as units_before
+            SUM(s.case_equivalent_qty) as units_before
         FROM visits v
         JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
         JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
@@ -642,7 +654,7 @@ def load_weekly_trend(weeks_back=12, _cache_version=CACHE_VERSION):
         SELECT
             v.task_id,
             s.product_code,
-            SUM(s.quantity) as units_after
+            SUM(s.case_equivalent_qty) as units_after
         FROM visits v
         JOIN account_vip_map m ON v.account_id = m.sfdc_account_id
         JOIN `artful-logic-475116-p1.analytics.vip_sales_clean` s
@@ -717,20 +729,32 @@ def load_avg_skus_per_door_by_owner(days_back=90, _cache_version=CACHE_VERSION):
     """
     client = get_bq_client()
     query = f"""
-    WITH owner_door_skus AS (
+    WITH outlet_map AS (
+        -- Bridge: account_code (sales) → vip_id (fact sheet) via retail_outlets
+        SELECT DISTINCT
+            Account as account_code,
+            CAST(DistId AS STRING) as distributor_code,
+            CAST(VipId AS STRING) as vip_id
+        FROM `artful-logic-475116-p1.raw_vip.retail_outlets`
+        WHERE VipId IS NOT NULL
+    ),
+    owner_door_skus AS (
         -- Get unique SKUs per door per owner from VIP sales
         SELECT
             a.OwnerId as owner_id,
-            r.sfdc_account_id,
+            r.sf_account_id as sfdc_account_id,
             COUNT(DISTINCT s.product_code) as unique_skus
         FROM `artful-logic-475116-p1.analytics.vip_sales_clean` s
-        JOIN `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_v2` r
-            ON s.account_code = r.vip_account_code
-            AND s.distributor_code = r.primary_distributor_code
+        JOIN outlet_map om
+            ON s.account_code = om.account_code
+            AND s.distributor_code = om.distributor_code
+        JOIN `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_2026` r
+            ON om.vip_id = r.vip_id
+            AND om.distributor_code = r.primary_distributor_code
         JOIN `artful-logic-475116-p1.raw_salesforce.Account` a
-            ON r.sfdc_account_id = a.Id
+            ON r.sf_account_id = a.Id
         WHERE s.transaction_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {days_back} DAY)
-            AND r.sfdc_account_id IS NOT NULL
+            AND r.sf_account_id IS NOT NULL
             AND a.OwnerId IS NOT NULL
         GROUP BY a.OwnerId, r.sfdc_account_id
     ),

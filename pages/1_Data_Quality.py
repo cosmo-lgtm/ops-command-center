@@ -155,15 +155,15 @@ def load_covered_doors_stats():
     query = """
     SELECT
         COUNT(*) as total_covered_doors,
-        SUM(CASE WHEN sfdc_account_id IS NOT NULL THEN 1 ELSE 0 END) as matched_to_sfdc,
-        SUM(CASE WHEN vip_code_count > 1 THEN 1 ELSE 0 END) as consolidated_addresses,
-        SUM(vip_code_count) - COUNT(*) as codes_consolidated,
+        SUM(CASE WHEN sf_account_id IS NOT NULL THEN 1 ELSE 0 END) as matched_to_sfdc,
+        0 as consolidated_addresses,
+        0 as codes_consolidated,
         MAX(most_recent_order_date) as latest_depletion_date,
         SUM(qty_last_30_days) as total_30d_volume,
         SUM(CASE WHEN customer_status = 'Active' THEN 1 ELSE 0 END) as active_customers,
         SUM(CASE WHEN customer_status = 'At Risk' THEN 1 ELSE 0 END) as at_risk_customers,
         SUM(CASE WHEN customer_status = 'Churned' THEN 1 ELSE 0 END) as churned_customers
-    FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_v2_deduped`
+    FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_2026`
     """
     return client.query(query).to_dataframe().iloc[0]
 

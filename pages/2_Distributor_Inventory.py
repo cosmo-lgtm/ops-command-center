@@ -185,10 +185,11 @@ def load_distributors():
     SELECT DISTINCT
         d.distributor_code,
         d.distributor_name,
-        d.sfdc_distributor_account_id,
+        d.sf_account_id,
         CAST(d.total_retailers AS INT64) as total_retailers
-    FROM `artful-logic-475116-p1.staging_vip.distributor_fact_sheet_v2` d
+    FROM `artful-logic-475116-p1.staging_vip.distributor_fact_sheet_2026` d
     WHERE d.distributor_code IS NOT NULL
+      AND NOT d.is_parent_rollup
     ORDER BY d.distributor_name
     """
     return client.query(query).to_dataframe()
@@ -248,13 +249,18 @@ def load_inventory_data(lookback_days: int = 90):
 
     -- VIP depletion by distributor (last N days)
     -- Uses raw sales_lite for fresh data
+    -- UOM=B (bottles) converted to case-equivalents (÷6)
     vip_depletion AS (
         SELECT
             sl.Dist_Code as distributor_code,
-            SUM(SAFE_CAST(sl.Qty AS INT64)) as qty_depleted,
+            SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64)
+                     WHEN sl.UOM = 'B' THEN ROUND(SAFE_CAST(sl.Qty AS INT64) / 6.0)
+                     ELSE SAFE_CAST(sl.Qty AS INT64) END) as qty_depleted,
             COUNT(DISTINCT sl.Acct_Code) as stores_reached,
             COUNT(*) as transaction_count,
-            SUM(SAFE_CAST(sl.Qty AS INT64)) / ({lookback_days} / 7.0) as weekly_depletion_rate
+            SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64)
+                     WHEN sl.UOM = 'B' THEN ROUND(SAFE_CAST(sl.Qty AS INT64) / 6.0)
+                     ELSE SAFE_CAST(sl.Qty AS INT64) END) / ({lookback_days} / 7.0) as weekly_depletion_rate
         FROM `artful-logic-475116-p1.raw_vip.sales_lite` sl
         WHERE SAFE.PARSE_DATE('%Y%m%d', sl.Invoice_Date) >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
             AND SAFE_CAST(sl.Qty AS INT64) > 0  -- Positive sales only
@@ -269,12 +275,11 @@ def load_inventory_data(lookback_days: int = 90):
         SELECT
             v.distributor_code,
             v.distributor_name as vip_dist_name,
-            v.sfdc_distributor_account_id as sf_child_id,
-            a.ParentId as sf_parent_id,
+            v.sf_account_id as sf_child_id,
+            v.parent_sf_account_id as sf_parent_id,
             CAST(v.total_retailers AS INT64) as total_retailers
-        FROM `artful-logic-475116-p1.staging_vip.distributor_fact_sheet_v2` v
-        LEFT JOIN `artful-logic-475116-p1.raw_salesforce.Account` a
-            ON v.sfdc_distributor_account_id = a.Id
+        FROM `artful-logic-475116-p1.staging_vip.distributor_fact_sheet_2026` v
+        WHERE NOT v.is_parent_rollup
     ),
 
     -- Roll up VIP depletion to SF order accounts
@@ -415,17 +420,25 @@ def load_product_level_data(distributor_codes: list = None, lookback_days: int =
         sl.Item_Code,
         COALESCE(i.item_description, sl.Item_Code) as product_name,
         i.BrandDesc as brand,
-        SUM(SAFE_CAST(sl.Qty AS INT64)) as qty_depleted,
+        SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64)
+                 WHEN sl.UOM = 'B' THEN ROUND(SAFE_CAST(sl.Qty AS INT64) / 6.0)
+                 ELSE SAFE_CAST(sl.Qty AS INT64) END) as qty_depleted,
         COUNT(DISTINCT sl.Acct_Code) as stores_reached,
         COUNT(*) as transaction_count,
-        ROUND(SUM(SAFE_CAST(sl.Qty AS INT64)) / ({lookback_days} / 7.0), 1) as weekly_depletion_rate,
+        ROUND(SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64)
+                       WHEN sl.UOM = 'B' THEN ROUND(SAFE_CAST(sl.Qty AS INT64) / 6.0)
+                       ELSE SAFE_CAST(sl.Qty AS INT64) END) / ({lookback_days} / 7.0), 1) as weekly_depletion_rate,
         CASE
-            WHEN SUM(SAFE_CAST(sl.Qty AS INT64)) / ({lookback_days} / 7.0) >= 10 THEN 'High Velocity'
-            WHEN SUM(SAFE_CAST(sl.Qty AS INT64)) / ({lookback_days} / 7.0) >= 3 THEN 'Medium Velocity'
+            WHEN SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64)
+                          WHEN sl.UOM = 'B' THEN ROUND(SAFE_CAST(sl.Qty AS INT64) / 6.0)
+                          ELSE SAFE_CAST(sl.Qty AS INT64) END) / ({lookback_days} / 7.0) >= 10 THEN 'High Velocity'
+            WHEN SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64)
+                          WHEN sl.UOM = 'B' THEN ROUND(SAFE_CAST(sl.Qty AS INT64) / 6.0)
+                          ELSE SAFE_CAST(sl.Qty AS INT64) END) / ({lookback_days} / 7.0) >= 3 THEN 'Medium Velocity'
             ELSE 'Low Velocity'
         END as velocity_status
     FROM `artful-logic-475116-p1.raw_vip.sales_lite` sl
-    JOIN `artful-logic-475116-p1.staging_vip.distributor_fact_sheet_v2` d
+    JOIN `artful-logic-475116-p1.staging_vip.distributor_fact_sheet_2026` d
         ON sl.Dist_Code = d.distributor_code
     LEFT JOIN items_deduped i
         ON sl.Item_Code = i.item_code
@@ -450,21 +463,23 @@ def load_state_depletion_data(lookback_days: int = 90):
     -- POD = Points of Distribution = unique (door, SKU) combinations
     WITH state_depletion AS (
         SELECT
-            d.state,
-            d.distributor_code,
-            SUM(SAFE_CAST(sl.Qty AS INT64)) as qty_depleted,
+            d.State as state,
+            CAST(d.Distributor_ID AS STRING) as distributor_code,
+            SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64)
+                     WHEN sl.UOM = 'B' THEN ROUND(SAFE_CAST(sl.Qty AS INT64) / 6.0)
+                     ELSE SAFE_CAST(sl.Qty AS INT64) END) as qty_depleted,
             COUNT(DISTINCT sl.Acct_Code) as stores_reached,
             COUNT(DISTINCT CONCAT(sl.Acct_Code, '|', sl.Item_Code)) as pod_count
         FROM `artful-logic-475116-p1.raw_vip.sales_lite` sl
-        JOIN `artful-logic-475116-p1.staging_vip.distributor_fact_sheet_v2` d
-            ON sl.Dist_Code = d.distributor_code
+        JOIN `artful-logic-475116-p1.raw_vip.distributors` d
+            ON sl.Dist_Code = CAST(d.Distributor_ID AS STRING)
         WHERE SAFE.PARSE_DATE('%Y%m%d', sl.Invoice_Date) >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
             AND SAFE_CAST(sl.Qty AS INT64) > 0  -- Positive sales only
             AND sl.Item_Code NOT LIKE '99Z%'    -- Exclude adjustments
             AND sl.Item_Code != 'XXXXXX'        -- Exclude placeholder items
-            AND d.state IS NOT NULL
-            AND LENGTH(d.state) = 2
-        GROUP BY d.state, d.distributor_code
+            AND d.State IS NOT NULL
+            AND LENGTH(d.State) = 2
+        GROUP BY d.State, d.Distributor_ID
     )
     SELECT
         state,
@@ -517,10 +532,13 @@ def load_trend_data(lookback_weeks: int = 12):
     ),
 
     -- Weekly VIP depletion (uses raw sales_lite for fresh data)
+    -- UOM=B (bottles) converted to case-equivalents (÷6)
     weekly_depletion AS (
         SELECT
             DATE_TRUNC(SAFE.PARSE_DATE('%Y%m%d', Invoice_Date), WEEK) as week_start,
-            SUM(SAFE_CAST(Qty AS INT64)) as qty_depleted,
+            SUM(CASE WHEN UOM = 'C' THEN SAFE_CAST(Qty AS INT64)
+                     WHEN UOM = 'B' THEN ROUND(SAFE_CAST(Qty AS INT64) / 6.0)
+                     ELSE SAFE_CAST(Qty AS INT64) END) as qty_depleted,
             COUNT(DISTINCT Acct_Code) as stores_reached
         FROM `artful-logic-475116-p1.raw_vip.sales_lite`
         WHERE SAFE.PARSE_DATE('%Y%m%d', Invoice_Date) >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_weeks} WEEK)
@@ -556,12 +574,15 @@ def load_distributor_weekly_trends(lookback_weeks: int = 12):
             d.distributor_code,
             d.distributor_name,
             DATE_TRUNC(SAFE.PARSE_DATE('%Y%m%d', sl.Invoice_Date), WEEK) as week_start,
-            SUM(SAFE_CAST(sl.Qty AS INT64)) as qty_depleted,
+            SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64)
+                     WHEN sl.UOM = 'B' THEN ROUND(SAFE_CAST(sl.Qty AS INT64) / 6.0)
+                     ELSE SAFE_CAST(sl.Qty AS INT64) END) as qty_depleted,
             COUNT(DISTINCT sl.Acct_Code) as stores_reached,
             COUNT(DISTINCT sl.Item_Code) as skus_sold
         FROM `artful-logic-475116-p1.raw_vip.sales_lite` sl
-        JOIN `artful-logic-475116-p1.staging_vip.distributor_fact_sheet_v2` d
+        JOIN `artful-logic-475116-p1.staging_vip.distributor_fact_sheet_2026` d
             ON sl.Dist_Code = d.distributor_code
+            AND NOT d.is_parent_rollup
         WHERE SAFE.PARSE_DATE('%Y%m%d', sl.Invoice_Date) >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_weeks} WEEK)
             AND SAFE_CAST(sl.Qty AS INT64) > 0  -- Positive sales only
             AND sl.Item_Code NOT LIKE '99Z%'    -- Exclude adjustments
