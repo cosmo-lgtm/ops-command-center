@@ -352,7 +352,7 @@ def main():
         st.warning("No LTV data available. Ensure the BQ views exist.")
         return
 
-    s = summary.iloc[0]
+    s = summary.iloc[0].apply(lambda v: float(v) if hasattr(v, '__float__') else v)
     repeat_rate = (s['repeat_customers'] / s['total_customers'] * 100) if s['total_customers'] else 0
 
     # --- KPI Row ---
