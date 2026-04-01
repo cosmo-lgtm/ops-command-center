@@ -544,8 +544,8 @@ def main():
             apply_dark_theme(fig3, height=350,
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#8892b0')),
                 yaxis={'title': 'Repeat Rate (%)', 'range': [0, 100]},
-                yaxis2=dict(overlaying='y', side='right', showgrid=False, title='Customers', titlefont=dict(color='#8892b0'), tickfont=dict(color='#5a6a8a'))
             )
+            fig3.update_layout(yaxis2=dict(overlaying='y', side='right', showgrid=False, title='Customers', titlefont=dict(color='#8892b0'), tickfont=dict(color='#5a6a8a')))
             st.plotly_chart(fig3, use_container_width=True)
 
     # === Tab 3: Cohort Retention ===
