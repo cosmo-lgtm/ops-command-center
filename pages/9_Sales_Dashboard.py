@@ -633,10 +633,6 @@ def calculate_seasonal_forecast(daily_df: pd.DataFrame, forecast_days: int = 30)
 def format_currency(val):
     if pd.isna(val) or val == 0:
         return "$0"
-    if val >= 1_000_000:
-        return f"${val/1_000_000:.1f}M"
-    if val >= 1_000:
-        return f"${val/1_000:.0f}K"
     return f"${val:,.0f}"
 
 
