@@ -169,15 +169,22 @@ def get_bq_client():
 
 
 def _run_query(query):
-    """Run BQ query and convert Decimal columns to float."""
+    """Run BQ query and force all numeric-like columns to native float/int."""
     client = get_bq_client()
     df = client.query(query).to_dataframe()
-    for col in df.select_dtypes(include=['object']).columns:
+    for col in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            continue
         try:
             df[col] = pd.to_numeric(df[col])
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, ArithmeticError):
             pass
     return df
+
+
+def _f(val):
+    """Force a value to native float (handles Decimal, numpy, etc)."""
+    return float(val) if val is not None else 0.0
 
 
 # --- Data Loaders ---
@@ -360,36 +367,47 @@ def main():
         return
 
     s = summary.iloc[0]
-    repeat_rate = (s['repeat_customers'] / s['total_customers'] * 100) if s['total_customers'] else 0
+    total_revenue = _f(s['total_revenue'])
+    total_customers = _f(s['total_customers'])
+    avg_ltv = _f(s['avg_ltv'])
+    median_ltv = _f(s['median_ltv'])
+    avg_orders = _f(s['avg_orders'])
+    repeat_customers = _f(s['repeat_customers'])
+    cross_platform = _f(s['cross_platform'])
+    woo_revenue = _f(s['woo_revenue'])
+    shopify_revenue = _f(s['shopify_revenue'])
+    woo_customers = _f(s['woo_customers'])
+    shopify_customers = _f(s['shopify_customers'])
+    repeat_rate = (repeat_customers / total_customers * 100) if total_customers else 0
 
     # --- KPI Row ---
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     with c1:
-        st.markdown(render_metric(f"${s['total_revenue']/1e6:.1f}M", "Lifetime Revenue"), unsafe_allow_html=True)
+        st.markdown(render_metric(f"${total_revenue/1e6:.1f}M", "Lifetime Revenue"), unsafe_allow_html=True)
     with c2:
-        st.markdown(render_metric(f"{s['total_customers']:,.0f}", "Unique Customers", style="teal"), unsafe_allow_html=True)
+        st.markdown(render_metric(f"{total_customers:,.0f}", "Unique Customers", style="teal"), unsafe_allow_html=True)
     with c3:
-        st.markdown(render_metric(f"${s['avg_ltv']:.0f}", "Avg LTV", style="gold", sub=f"Median: ${s['median_ltv']:.0f}"), unsafe_allow_html=True)
+        st.markdown(render_metric(f"${avg_ltv:.0f}", "Avg LTV", style="gold", sub=f"Median: ${median_ltv:.0f}"), unsafe_allow_html=True)
     with c4:
-        st.markdown(render_metric(f"{s['avg_orders']:.1f}", "Avg Orders", style="blue"), unsafe_allow_html=True)
+        st.markdown(render_metric(f"{avg_orders:.1f}", "Avg Orders", style="blue"), unsafe_allow_html=True)
     with c5:
-        st.markdown(render_metric(f"{repeat_rate:.1f}%", "Repeat Rate", style="teal", sub=f"{s['repeat_customers']:,.0f} repeat"), unsafe_allow_html=True)
+        st.markdown(render_metric(f"{repeat_rate:.1f}%", "Repeat Rate", style="teal", sub=f"{repeat_customers:,.0f} repeat"), unsafe_allow_html=True)
     with c6:
-        st.markdown(render_metric(f"{s['cross_platform']:,.0f}", "Cross-Platform", style="gold", sub="Woo + Shopify"), unsafe_allow_html=True)
+        st.markdown(render_metric(f"{cross_platform:,.0f}", "Cross-Platform", style="gold", sub="Woo + Shopify"), unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     # --- Platform Insight Banner ---
-    woo_pct = s['woo_revenue'] / s['total_revenue'] * 100 if s['total_revenue'] else 0
+    woo_pct = woo_revenue / total_revenue * 100 if total_revenue else 0
     shopify_pct = 100 - woo_pct
     st.markdown(f"""
     <div class="insight-banner">
         <strong style="color: #f093fb;">Platform Split:</strong>
         <span style="color: {COLORS['woo']}; margin-left: 12px;">WooCommerce</span>
-        ${s['woo_revenue']/1e6:.1f}M ({woo_pct:.0f}%) &bull; {s['woo_customers']:,.0f} customers
+        ${woo_revenue/1e6:.1f}M ({woo_pct:.0f}%) &bull; {woo_customers:,.0f} customers
         &nbsp;&nbsp;|&nbsp;&nbsp;
         <span style="color: {COLORS['shopify']};">Shopify</span>
-        ${s['shopify_revenue']/1e6:.1f}M ({shopify_pct:.0f}%) &bull; {s['shopify_customers']:,.0f} customers
+        ${shopify_revenue/1e6:.1f}M ({shopify_pct:.0f}%) &bull; {shopify_customers:,.0f} customers
     </div>
     """, unsafe_allow_html=True)
 
@@ -414,7 +432,7 @@ def main():
                 df = monthly[monthly['platform'] == platform]
                 fig.add_trace(go.Bar(
                     x=df['month'],
-                    y=df['revenue'],
+                    y=df['revenue'].astype(float),
                     name=platform,
                     marker_color=color,
                     hovertemplate='%{x|%b %Y}<br>$%{y:,.0f}<extra>' + platform + '</extra>'
@@ -428,14 +446,14 @@ def main():
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            # Orders trend (secondary)
+            # Orders trend
             st.markdown('<p class="section-header">Monthly Order Volume</p>', unsafe_allow_html=True)
             fig2 = go.Figure()
             for platform, color in [('WooCommerce', COLORS['woo']), ('Shopify', COLORS['shopify'])]:
                 df = monthly[monthly['platform'] == platform]
                 fig2.add_trace(go.Scatter(
                     x=df['month'],
-                    y=df['orders'],
+                    y=df['orders'].astype(float),
                     name=platform,
                     mode='lines+markers',
                     line=dict(color=color, width=2),
@@ -465,12 +483,12 @@ def main():
             with col1:
                 fig = go.Figure(go.Bar(
                     x=dist['ltv_bucket'],
-                    y=dist['customers'],
+                    y=dist['customers'].astype(float),
                     marker=dict(
-                        color=dist['bucket_order'],
+                        color=dist['bucket_order'].astype(float),
                         colorscale=[[0, COLORS['blue']], [0.5, COLORS['primary']], [1, COLORS['secondary']]],
                     ),
-                    text=dist['customers'].apply(lambda x: f'{x:,.0f}'),
+                    text=dist['customers'].apply(lambda x: f'{_f(x):,.0f}'),
                     textposition='outside',
                     textfont=dict(color='#ccd6f6', size=11),
                     hovertemplate='%{x}<br>%{y:,.0f} customers<extra></extra>'
@@ -482,12 +500,12 @@ def main():
             with col2:
                 fig2 = go.Figure(go.Bar(
                     x=dist['ltv_bucket'],
-                    y=dist['bucket_revenue'],
+                    y=dist['bucket_revenue'].astype(float),
                     marker=dict(
-                        color=dist['bucket_order'],
+                        color=dist['bucket_order'].astype(float),
                         colorscale=[[0, '#ffd666'], [0.5, '#ff9f43'], [1, '#f5576c']],
                     ),
-                    text=dist['bucket_revenue'].apply(lambda x: f'${x/1000:.0f}K'),
+                    text=dist['bucket_revenue'].apply(lambda x: f'${_f(x)/1000:.0f}K'),
                     textposition='outside',
                     textfont=dict(color='#ccd6f6', size=11),
                     hovertemplate='%{x}<br>$%{y:,.0f} revenue<extra></extra>'
@@ -499,10 +517,12 @@ def main():
             # Key insight
             top_bucket = dist[dist['ltv_bucket'] == '$1K+']
             if not top_bucket.empty:
-                top_cust = top_bucket['customers'].iloc[0]
-                top_rev = top_bucket['bucket_revenue'].iloc[0]
-                top_pct = top_cust / dist['customers'].sum() * 100
-                rev_pct = top_rev / dist['bucket_revenue'].sum() * 100
+                top_cust = _f(top_bucket['customers'].iloc[0])
+                top_rev = _f(top_bucket['bucket_revenue'].iloc[0])
+                total_cust = _f(dist['customers'].sum())
+                total_rev = _f(dist['bucket_revenue'].sum())
+                top_pct = top_cust / total_cust * 100 if total_cust else 0
+                rev_pct = top_rev / total_rev * 100 if total_rev else 0
                 st.markdown(f"""
                 <div class="insight-banner">
                     <strong style="color: #ffd666;">$1K+ Customers:</strong>
@@ -522,7 +542,7 @@ def main():
             fig3 = go.Figure()
             fig3.add_trace(go.Bar(
                 x=repeat_df['quarter'],
-                y=repeat_df['total_customers'],
+                y=repeat_df['total_customers'].astype(float),
                 name='Total Customers',
                 marker_color='rgba(116, 185, 255, 0.3)',
                 yaxis='y2',
@@ -530,12 +550,12 @@ def main():
             ))
             fig3.add_trace(go.Scatter(
                 x=repeat_df['quarter'],
-                y=repeat_df['repeat_rate'],
+                y=repeat_df['repeat_rate'].astype(float),
                 name='Repeat Rate %',
                 mode='lines+markers+text',
                 line=dict(color=COLORS['primary'], width=3),
                 marker=dict(size=8),
-                text=repeat_df['repeat_rate'].apply(lambda x: f'{x:.0f}%'),
+                text=repeat_df['repeat_rate'].apply(lambda x: f'{_f(x):.0f}%'),
                 textposition='top center',
                 textfont=dict(color='#ccd6f6', size=10),
                 hovertemplate='%{x}<br>%{y:.1f}% repeat<extra></extra>'
@@ -545,7 +565,13 @@ def main():
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#8892b0')),
                 yaxis={'title': 'Repeat Rate (%)', 'range': [0, 100]},
             )
-            fig3.update_layout(yaxis2=dict(overlaying='y', side='right', showgrid=False, title='Customers', titlefont=dict(color='#8892b0'), tickfont=dict(color='#5a6a8a')))
+            fig3.update_layout(
+                yaxis2=dict(
+                    overlaying='y', side='right', showgrid=False,
+                    title=dict(text='Customers', font=dict(color='#8892b0')),
+                    tickfont=dict(color='#5a6a8a')
+                )
+            )
             st.plotly_chart(fig3, use_container_width=True)
 
     # === Tab 3: Cohort Retention ===
@@ -565,45 +591,48 @@ def main():
                 columns='months_since_first',
                 values='customers',
                 aggfunc='sum'
-            ).fillna(0)
+            ).fillna(0).astype(float)
 
-            # Calculate retention percentages
-            month_0 = pivot[0]
-            retention_pct = pivot.div(month_0, axis=0) * 100
+            if 0 in pivot.columns:
+                month_0 = pivot[0].replace(0, np.nan)
+                retention_pct = pivot.div(month_0, axis=0) * 100
+                retention_pct = retention_pct.fillna(0)
 
-            # Only show cohorts with at least some data
-            retention_pct = retention_pct[month_0 > 50]
+                # Only show cohorts with meaningful M0
+                retention_pct = retention_pct[pivot[0] > 50]
 
-            if not retention_pct.empty:
-                fig = go.Figure(data=go.Heatmap(
-                    z=retention_pct.values,
-                    x=[f'M{i}' for i in retention_pct.columns],
-                    y=retention_pct.index,
-                    colorscale=[
-                        [0, '#0f0f1a'],
-                        [0.05, '#1a1a3e'],
-                        [0.15, '#2a2a6a'],
-                        [0.3, '#667eea'],
-                        [0.5, '#f093fb'],
-                        [1.0, '#f5576c']
-                    ],
-                    text=retention_pct.values.round(1).astype(str) + '%',
-                    texttemplate='%{text}',
-                    textfont=dict(size=9, color='#ccd6f6'),
-                    hovertemplate='Cohort: %{y}<br>Month: %{x}<br>Retention: %{z:.1f}%<extra></extra>',
-                    colorbar=dict(
-                        title='Retention %',
-                        titlefont=dict(color='#8892b0'),
-                        tickfont=dict(color='#8892b0')
+                if not retention_pct.empty:
+                    z_vals = retention_pct.values
+                    z_text = np.where(z_vals > 0, np.char.add(np.round(z_vals, 1).astype(str), '%'), '')
+
+                    fig = go.Figure(data=go.Heatmap(
+                        z=z_vals,
+                        x=[f'M{i}' for i in retention_pct.columns],
+                        y=retention_pct.index.tolist(),
+                        colorscale=[
+                            [0, '#0f0f1a'],
+                            [0.05, '#1a1a3e'],
+                            [0.15, '#2a2a6a'],
+                            [0.3, '#667eea'],
+                            [0.5, '#f093fb'],
+                            [1.0, '#f5576c']
+                        ],
+                        text=z_text,
+                        texttemplate='%{text}',
+                        textfont=dict(size=9, color='#ccd6f6'),
+                        hovertemplate='Cohort: %{y}<br>Month: %{x}<br>Retention: %{z:.1f}%<extra></extra>',
+                        colorbar=dict(
+                            title=dict(text='Retention %', font=dict(color='#8892b0')),
+                            tickfont=dict(color='#8892b0')
+                        )
+                    ))
+
+                    apply_dark_theme(fig, height=max(400, len(retention_pct) * 22),
+                        xaxis={'title': 'Months Since First Purchase', 'side': 'bottom'},
+                        yaxis={'title': '', 'autorange': 'reversed'},
+                        margin=dict(l=80, r=20, t=20, b=60)
                     )
-                ))
-
-                apply_dark_theme(fig, height=max(400, len(retention_pct) * 22),
-                    xaxis={'title': 'Months Since First Purchase', 'side': 'bottom'},
-                    yaxis={'title': '', 'autorange': 'reversed'},
-                    margin=dict(l=80, r=20, t=20, b=60)
-                )
-                st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True)
 
             # Revenue per customer by cohort
             st.markdown('<p class="section-header">Revenue per Customer by Cohort Month</p>', unsafe_allow_html=True)
@@ -613,24 +642,27 @@ def main():
                 columns='months_since_first',
                 values='revenue_per_customer',
                 aggfunc='sum'
-            ).fillna(0)
+            ).fillna(0).astype(float)
 
             # Cumulative revenue per customer
             rev_cumulative = rev_pivot.cumsum(axis=1)
             recent_cohorts = rev_cumulative.tail(12)
 
-            if not recent_cohorts.empty:
+            if not recent_cohorts.empty and len(recent_cohorts) > 0:
                 fig2 = go.Figure()
-                colors = px.colors.sample_colorscale('Plasma', np.linspace(0, 0.9, len(recent_cohorts)))
+                n_cohorts = max(len(recent_cohorts), 2)
+                colors = px.colors.sample_colorscale('Plasma', np.linspace(0, 0.9, n_cohorts))
                 for i, (cohort, row) in enumerate(recent_cohorts.iterrows()):
                     vals = row[row > 0]
+                    if len(vals) == 0:
+                        continue
                     fig2.add_trace(go.Scatter(
                         x=[f'M{c}' for c in vals.index],
-                        y=vals.values,
-                        name=cohort,
+                        y=vals.values.astype(float),
+                        name=str(cohort),
                         mode='lines',
                         line=dict(color=colors[i], width=2),
-                        hovertemplate=f'{cohort}<br>Month %{{x}}<br>${{%{{y:,.0f}}}}<extra></extra>'
+                        hovertemplate=str(cohort) + '<br>Month %{x}<br>$%{y:,.0f}<extra></extra>'
                     ))
 
                 apply_dark_theme(fig2, height=400,
@@ -652,10 +684,10 @@ def main():
 
         if not top_df.empty:
             display_df = top_df.copy()
-            display_df['lifetime_revenue'] = display_df['lifetime_revenue'].apply(lambda x: f"${x:,.2f}")
+            display_df['lifetime_revenue'] = display_df['lifetime_revenue'].apply(lambda x: f"${_f(x):,.2f}")
             display_df['platform'] = display_df.apply(
-                lambda r: 'Both' if r['woo_orders'] > 0 and r['shopify_orders'] > 0
-                else ('Woo' if r['woo_orders'] > 0 else 'Shopify'),
+                lambda r: 'Both' if _f(r['woo_orders']) > 0 and _f(r['shopify_orders']) > 0
+                else ('Woo' if _f(r['woo_orders']) > 0 else 'Shopify'),
                 axis=1
             )
             display_df = display_df[['email', 'lifetime_orders', 'lifetime_revenue', 'first_order', 'last_order', 'platform', 'refunded_orders']]
@@ -664,7 +696,7 @@ def main():
             st.dataframe(display_df, use_container_width=True, hide_index=True, height=600)
 
     # Footer
-    st.markdown(f"""
+    st.markdown("""
     <div style="text-align: center; color: #8892b0; margin-top: 48px; padding: 24px; border-top: 1px solid rgba(255,255,255,0.1);">
         <p style="margin: 0;">Data: WooCommerce (Mar 2023 - Sep 2025) + Shopify (Jun 2025+)</p>
         <p style="margin: 4px 0 0 0; font-size: 12px;">Overlap period (Jun-Sep 2025) deduplicated by email + date + amount</p>
