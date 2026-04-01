@@ -161,12 +161,23 @@ def get_bq_client():
     return bigquery.Client(project='artful-logic-475116-p1')
 
 
+def _run_query(query):
+    """Run BQ query and convert Decimal columns to float."""
+    client = get_bq_client()
+    df = client.query(query).to_dataframe()
+    for col in df.select_dtypes(include=['object']).columns:
+        try:
+            df[col] = pd.to_numeric(df[col])
+        except (ValueError, TypeError):
+            pass
+    return df
+
+
 # --- Data Loaders ---
 
 @st.cache_data(ttl=600)
 def load_ltv_summary():
-    client = get_bq_client()
-    query = """
+    return _run_query("""
     SELECT
         COUNT(*) AS total_customers,
         ROUND(SUM(lifetime_revenue), 2) AS total_revenue,
@@ -182,14 +193,12 @@ def load_ltv_summary():
         ROUND(AVG(customer_lifespan_days), 0) AS avg_lifespan_days,
         COUNTIF(refunded_orders > 0) AS customers_with_refunds
     FROM `artful-logic-475116-p1.marts.vw_d2c_customer_ltv`
-    """
-    return client.query(query).to_dataframe()
+    """)
 
 
 @st.cache_data(ttl=600)
 def load_ltv_distribution():
-    client = get_bq_client()
-    query = """
+    return _run_query("""
     SELECT
         CASE
             WHEN lifetime_revenue < 25 THEN '$0-25'
@@ -214,14 +223,12 @@ def load_ltv_distribution():
     FROM `artful-logic-475116-p1.marts.vw_d2c_customer_ltv`
     GROUP BY 1, 2
     ORDER BY 2
-    """
-    return client.query(query).to_dataframe()
+    """)
 
 
 @st.cache_data(ttl=600)
 def load_monthly_revenue():
-    client = get_bq_client()
-    query = """
+    return _run_query("""
     WITH woo AS (
         SELECT
             DATE_TRUNC(TIMESTAMP(date_created), MONTH) AS month,
@@ -247,14 +254,12 @@ def load_monthly_revenue():
     UNION ALL
     SELECT * FROM shopify
     ORDER BY month, platform
-    """
-    return client.query(query).to_dataframe()
+    """)
 
 
 @st.cache_data(ttl=600)
 def load_cohort_data():
-    client = get_bq_client()
-    query = """
+    return _run_query("""
     SELECT
         FORMAT_TIMESTAMP('%Y-%m', cohort_month) AS cohort,
         months_since_first,
@@ -265,14 +270,12 @@ def load_cohort_data():
     FROM `artful-logic-475116-p1.marts.vw_d2c_cohort_analysis`
     WHERE months_since_first <= 18
     ORDER BY cohort, months_since_first
-    """
-    return client.query(query).to_dataframe()
+    """)
 
 
 @st.cache_data(ttl=600)
 def load_repeat_rate_trend():
-    client = get_bq_client()
-    query = """
+    return _run_query("""
     WITH customer_cohorts AS (
         SELECT
             email,
@@ -289,14 +292,12 @@ def load_repeat_rate_trend():
     FROM customer_cohorts
     GROUP BY 1, acquisition_quarter
     ORDER BY acquisition_quarter
-    """
-    return client.query(query).to_dataframe()
+    """)
 
 
 @st.cache_data(ttl=600)
 def load_top_customers():
-    client = get_bq_client()
-    query = """
+    return _run_query("""
     SELECT
         email,
         lifetime_orders,
@@ -309,8 +310,7 @@ def load_top_customers():
     FROM `artful-logic-475116-p1.marts.vw_d2c_customer_ltv`
     ORDER BY lifetime_revenue DESC
     LIMIT 50
-    """
-    return client.query(query).to_dataframe()
+    """)
 
 
 # --- Render Helpers ---
@@ -352,7 +352,7 @@ def main():
         st.warning("No LTV data available. Ensure the BQ views exist.")
         return
 
-    s = summary.iloc[0].apply(lambda v: float(v) if hasattr(v, '__float__') else v)
+    s = summary.iloc[0]
     repeat_rate = (s['repeat_customers'] / s['total_customers'] * 100) if s['total_customers'] else 0
 
     # --- KPI Row ---
