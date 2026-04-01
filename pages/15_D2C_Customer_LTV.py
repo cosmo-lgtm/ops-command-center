@@ -15,6 +15,13 @@ import numpy as np
 # Dark mode CSS
 st.markdown("""
 <style>
+    /* Force wide layout */
+    .block-container {
+        max-width: 100% !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+    }
+
     .metric-card {
         background: linear-gradient(145deg, #1e1e2f 0%, #2a2a4a 100%);
         border-radius: 16px;
