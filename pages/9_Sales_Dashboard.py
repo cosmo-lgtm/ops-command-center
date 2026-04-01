@@ -273,6 +273,49 @@ def load_b2c_products(start_date: str, end_date: str, net_revenue: bool = False)
 
 
 @st.cache_data(ttl=300)
+def load_b2b_by_state(start_date: str, end_date: str):
+    """Load B2B sales aggregated by Account ShippingState."""
+    return run_query(f"""
+    SELECT
+        UPPER(TRIM(a.ShippingState)) as state,
+        COUNT(DISTINCT sfo.order_id) as order_count,
+        ROUND(SUM(CAST(sfo.line_total_price AS FLOAT64)), 2) as revenue,
+        SUM(CAST(sfo.quantity AS FLOAT64)) as units
+    FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
+    LEFT JOIN `artful-logic-475116-p1.raw_salesforce.Account` a ON sfo.account_id = a.Id
+    WHERE sfo.order_status != 'Draft'
+        AND sfo.order_date >= '{start_date}'
+        AND sfo.order_date <= '{end_date}'
+        AND a.ShippingState IS NOT NULL
+        AND TRIM(a.ShippingState) != ''
+    GROUP BY state
+    ORDER BY revenue DESC
+    """)
+
+
+@st.cache_data(ttl=300)
+def load_b2c_by_state(start_date: str, end_date: str, net_revenue: bool = False):
+    """Load B2C sales aggregated by shipping province_code (state)."""
+    revenue_col = "current_subtotal_price" if net_revenue else "total_line_items_price"
+    return run_query(f"""
+    SELECT
+        UPPER(TRIM(JSON_VALUE(shipping_address, '$.province_code'))) as state,
+        COUNT(DISTINCT id) as order_count,
+        ROUND(SUM(CAST({revenue_col} AS FLOAT64)), 2) as revenue
+    FROM `artful-logic-475116-p1.raw_shopify.orders`
+    WHERE cancelled_at IS NULL
+        AND financial_status IN ('paid', 'partially_refunded')
+        AND DATE(created_at) >= '{start_date}'
+        AND DATE(created_at) <= '{end_date}'
+        AND JSON_VALUE(shipping_address, '$.province_code') IS NOT NULL
+        AND TRIM(JSON_VALUE(shipping_address, '$.province_code')) != ''
+        AND JSON_VALUE(shipping_address, '$.country_code') = 'US'
+    GROUP BY state
+    ORDER BY revenue DESC
+    """)
+
+
+@st.cache_data(ttl=300)
 def load_filter_options():
     """Load distinct values for filters."""
     owners = run_query("""
@@ -755,6 +798,8 @@ try:
     b2c_daily = load_b2c_daily(start_date_str, end_date_str, net_revenue=is_net)
     b2c_weekly = load_b2c_weekly(start_date_str, end_date_str, net_revenue=is_net)
     b2c_products = load_b2c_products(start_date_str, end_date_str, net_revenue=is_net)
+    b2b_by_state = load_b2b_by_state(start_date_str, end_date_str)
+    b2c_by_state = load_b2c_by_state(start_date_str, end_date_str, net_revenue=is_net)
     owner_options, account_type_options = load_filter_options()
 
     # Apply B2B net revenue: subtract QB credit memos (refunds + discounts)
@@ -1043,6 +1088,32 @@ with tab2:
         apply_dark_theme(fig, height=300)
         st.plotly_chart(fig, use_container_width=True)
 
+    # Sales by Ship-To State
+    st.divider()
+    st.subheader("Sales by Ship-To State")
+    if not b2b_by_state.empty:
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            top_states = b2b_by_state.head(15)
+            fig = px.bar(top_states, x='revenue', y='state', orientation='h',
+                         color_discrete_sequence=[COLORS['b2b']],
+                         labels={'revenue': 'Revenue', 'state': 'State'})
+            apply_dark_theme(fig, height=450)
+            fig.update_layout(showlegend=False, yaxis={'categoryorder': 'total ascending'},
+                              xaxis_title='Revenue', yaxis_title='')
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col2:
+            display_states = b2b_by_state.copy()
+            display_states['revenue'] = display_states['revenue'].apply(format_currency)
+            display_states['order_count'] = display_states['order_count'].apply(format_number)
+            display_states['units'] = display_states['units'].apply(format_number)
+            display_states.columns = ['State', 'Orders', 'Revenue', 'Units']
+            st.dataframe(display_states, hide_index=True, use_container_width=True, height=450)
+    else:
+        st.info("No state data available for the selected period")
+
 
 # ============================================================================
 # TAB 3: B2C PERFORMANCE
@@ -1097,6 +1168,31 @@ with tab3:
         display_products = display_products[['product_name', 'units_sold', 'revenue', 'order_count', 'avg_price']]
         display_products.columns = ['Product', 'Units Sold', 'Revenue', 'Orders', 'Avg Price']
         st.dataframe(display_products, hide_index=True, use_container_width=True)
+
+    # Sales by Ship-To State
+    st.divider()
+    st.subheader("Sales by Ship-To State")
+    if not b2c_by_state.empty:
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            top_states = b2c_by_state.head(15)
+            fig = px.bar(top_states, x='revenue', y='state', orientation='h',
+                         color_discrete_sequence=[COLORS['b2c']],
+                         labels={'revenue': 'Revenue', 'state': 'State'})
+            apply_dark_theme(fig, height=450)
+            fig.update_layout(showlegend=False, yaxis={'categoryorder': 'total ascending'},
+                              xaxis_title='Revenue', yaxis_title='')
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col2:
+            display_states = b2c_by_state.copy()
+            display_states['revenue'] = display_states['revenue'].apply(format_currency)
+            display_states['order_count'] = display_states['order_count'].apply(format_number)
+            display_states.columns = ['State', 'Orders', 'Revenue']
+            st.dataframe(display_states, hide_index=True, use_container_width=True, height=450)
+    else:
+        st.info("No state data available for the selected period")
 
 
 # ============================================================================
