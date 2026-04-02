@@ -112,6 +112,25 @@ st.markdown("""
         margin: 16px 0;
         color: #ccd6f6;
     }
+
+    /* Style the radio buttons to look like a segmented control */
+    div[data-testid="stRadio"] > div {
+        flex-direction: row;
+        gap: 0;
+    }
+    div[data-testid="stRadio"] > div > label {
+        padding: 6px 20px;
+        border: 1px solid rgba(255,255,255,0.15);
+        background: rgba(30,30,47,0.8);
+        color: #8892b0;
+        cursor: pointer;
+    }
+    div[data-testid="stRadio"] > div > label:first-child {
+        border-radius: 8px 0 0 8px;
+    }
+    div[data-testid="stRadio"] > div > label:last-child {
+        border-radius: 0 8px 8px 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -187,18 +206,28 @@ def _f(val):
     return float(val) if val is not None else 0.0
 
 
+def _platform_cols(platform):
+    """Return (revenue_col, orders_col, where_clause) for the selected platform."""
+    if platform == "WooCommerce":
+        return "woo_revenue", "woo_orders", "WHERE woo_orders > 0"
+    elif platform == "Shopify":
+        return "shopify_revenue", "shopify_orders", "WHERE shopify_orders > 0"
+    return "lifetime_revenue", "lifetime_orders", ""
+
+
 # --- Data Loaders ---
 
 @st.cache_data(ttl=600)
-def load_ltv_summary():
-    return _run_query("""
+def load_ltv_summary(platform="All"):
+    rev, ord_, where = _platform_cols(platform)
+    return _run_query(f"""
     SELECT
         COUNT(*) AS total_customers,
-        ROUND(SUM(lifetime_revenue), 2) AS total_revenue,
-        ROUND(AVG(lifetime_revenue), 2) AS avg_ltv,
-        ROUND(APPROX_QUANTILES(lifetime_revenue, 100)[OFFSET(50)], 2) AS median_ltv,
-        ROUND(AVG(lifetime_orders), 1) AS avg_orders,
-        COUNTIF(lifetime_orders > 1) AS repeat_customers,
+        ROUND(SUM({rev}), 2) AS total_revenue,
+        ROUND(AVG({rev}), 2) AS avg_ltv,
+        ROUND(APPROX_QUANTILES({rev}, 100)[OFFSET(50)], 2) AS median_ltv,
+        ROUND(AVG({ord_}), 1) AS avg_orders,
+        COUNTIF({ord_} > 1) AS repeat_customers,
         COUNTIF(woo_orders > 0 AND shopify_orders > 0) AS cross_platform,
         ROUND(SUM(woo_revenue), 2) AS woo_revenue,
         ROUND(SUM(shopify_revenue), 2) AS shopify_revenue,
@@ -207,34 +236,37 @@ def load_ltv_summary():
         ROUND(AVG(customer_lifespan_days), 0) AS avg_lifespan_days,
         COUNTIF(refunded_orders > 0) AS customers_with_refunds
     FROM `artful-logic-475116-p1.marts.vw_d2c_customer_ltv`
+    {where}
     """)
 
 
 @st.cache_data(ttl=600)
-def load_ltv_distribution():
-    return _run_query("""
+def load_ltv_distribution(platform="All"):
+    rev, _, where = _platform_cols(platform)
+    return _run_query(f"""
     SELECT
         CASE
-            WHEN lifetime_revenue < 25 THEN '$0-25'
-            WHEN lifetime_revenue < 50 THEN '$25-50'
-            WHEN lifetime_revenue < 100 THEN '$50-100'
-            WHEN lifetime_revenue < 200 THEN '$100-200'
-            WHEN lifetime_revenue < 500 THEN '$200-500'
-            WHEN lifetime_revenue < 1000 THEN '$500-1K'
+            WHEN {rev} < 25 THEN '$0-25'
+            WHEN {rev} < 50 THEN '$25-50'
+            WHEN {rev} < 100 THEN '$50-100'
+            WHEN {rev} < 200 THEN '$100-200'
+            WHEN {rev} < 500 THEN '$200-500'
+            WHEN {rev} < 1000 THEN '$500-1K'
             ELSE '$1K+'
         END AS ltv_bucket,
         CASE
-            WHEN lifetime_revenue < 25 THEN 1
-            WHEN lifetime_revenue < 50 THEN 2
-            WHEN lifetime_revenue < 100 THEN 3
-            WHEN lifetime_revenue < 200 THEN 4
-            WHEN lifetime_revenue < 500 THEN 5
-            WHEN lifetime_revenue < 1000 THEN 6
+            WHEN {rev} < 25 THEN 1
+            WHEN {rev} < 50 THEN 2
+            WHEN {rev} < 100 THEN 3
+            WHEN {rev} < 200 THEN 4
+            WHEN {rev} < 500 THEN 5
+            WHEN {rev} < 1000 THEN 6
             ELSE 7
         END AS bucket_order,
         COUNT(*) AS customers,
-        ROUND(SUM(lifetime_revenue), 0) AS bucket_revenue
+        ROUND(SUM({rev}), 0) AS bucket_revenue
     FROM `artful-logic-475116-p1.marts.vw_d2c_customer_ltv`
+    {where}
     GROUP BY 1, 2
     ORDER BY 2
     """)
@@ -272,37 +304,101 @@ def load_monthly_revenue():
 
 
 @st.cache_data(ttl=600)
-def load_cohort_data():
-    return _run_query("""
+def load_cohort_data(platform="All"):
+    if platform == "All":
+        return _run_query("""
+        SELECT
+            FORMAT_TIMESTAMP('%Y-%m', cohort_month) AS cohort,
+            months_since_first,
+            customers,
+            orders,
+            revenue,
+            revenue_per_customer
+        FROM `artful-logic-475116-p1.marts.vw_d2c_cohort_analysis`
+        WHERE months_since_first <= 18
+        ORDER BY cohort, months_since_first
+        """)
+
+    # Platform-specific: inline query with source filter since the view doesn't have it
+    source = 'woocommerce' if platform == "WooCommerce" else 'shopify'
+    return _run_query(f"""
+    WITH woo_orders AS (
+      SELECT order_id, LOWER(TRIM(billing_email)) AS email,
+        TIMESTAMP(date_created) AS order_date, CAST(total AS NUMERIC) AS total,
+        'woocommerce' AS source
+      FROM `artful-logic-475116-p1.raw_woocommerce.orders`
+      WHERE status IN ('completed', 'refunded')
+        AND billing_email IS NOT NULL AND TRIM(billing_email) != ''
+    ),
+    shopify_orders AS (
+      SELECT id AS order_id, LOWER(TRIM(email)) AS email,
+        created_at AS order_date, total_price AS total,
+        'shopify' AS source
+      FROM `artful-logic-475116-p1.raw_shopify.orders`
+      WHERE financial_status IN ('paid', 'partially_refunded', 'refunded')
+        AND cancelled_at IS NULL
+        AND email IS NOT NULL AND TRIM(email) != ''
+    ),
+    overlap_dupes AS (
+      SELECT DISTINCT w.order_id AS woo_order_id
+      FROM woo_orders w
+      INNER JOIN shopify_orders s
+        ON w.email = s.email
+        AND DATE(w.order_date) = DATE(s.order_date)
+        AND ABS(w.total - s.total) < 1.00
+      WHERE w.order_date >= '2025-06-01'
+        AND w.order_date < '2025-10-01'
+    ),
+    all_orders AS (
+      SELECT * FROM woo_orders
+      WHERE order_id NOT IN (SELECT woo_order_id FROM overlap_dupes)
+      UNION ALL
+      SELECT * FROM shopify_orders
+    ),
+    filtered AS (
+      SELECT * FROM all_orders WHERE source = '{source}'
+    ),
+    customer_first AS (
+      SELECT email, DATE_TRUNC(MIN(order_date), MONTH) AS cohort_month
+      FROM filtered GROUP BY email
+    ),
+    order_with_cohort AS (
+      SELECT o.*, cf.cohort_month,
+        DATE_DIFF(DATE_TRUNC(DATE(o.order_date), MONTH), DATE(cf.cohort_month), MONTH) AS months_since_first
+      FROM filtered o JOIN customer_first cf USING (email)
+    )
     SELECT
-        FORMAT_TIMESTAMP('%Y-%m', cohort_month) AS cohort,
-        months_since_first,
-        customers,
-        orders,
-        revenue,
-        revenue_per_customer
-    FROM `artful-logic-475116-p1.marts.vw_d2c_cohort_analysis`
+      FORMAT_TIMESTAMP('%Y-%m', cohort_month) AS cohort,
+      months_since_first,
+      COUNT(DISTINCT email) AS customers,
+      COUNT(*) AS orders,
+      ROUND(SUM(total), 2) AS revenue,
+      ROUND(SUM(total) / COUNT(DISTINCT email), 2) AS revenue_per_customer
+    FROM order_with_cohort
     WHERE months_since_first <= 18
-    ORDER BY cohort, months_since_first
+    GROUP BY 1, 2
+    ORDER BY 1, 2
     """)
 
 
 @st.cache_data(ttl=600)
-def load_repeat_rate_trend():
-    return _run_query("""
+def load_repeat_rate_trend(platform="All"):
+    _, ord_, where = _platform_cols(platform)
+    return _run_query(f"""
     WITH customer_cohorts AS (
         SELECT
             email,
             DATE_TRUNC(first_order_date, QUARTER) AS acquisition_quarter,
-            lifetime_orders
+            {ord_} AS platform_orders
         FROM `artful-logic-475116-p1.marts.vw_d2c_customer_ltv`
+        {where}
     )
     SELECT
         FORMAT_TIMESTAMP('%Y-Q%Q', acquisition_quarter) AS quarter,
         COUNT(*) AS total_customers,
-        COUNTIF(lifetime_orders > 1) AS repeat_customers,
-        ROUND(COUNTIF(lifetime_orders > 1) / COUNT(*) * 100, 1) AS repeat_rate,
-        ROUND(AVG(lifetime_orders), 2) AS avg_orders
+        COUNTIF(platform_orders > 1) AS repeat_customers,
+        ROUND(COUNTIF(platform_orders > 1) / COUNT(*) * 100, 1) AS repeat_rate,
+        ROUND(AVG(platform_orders), 2) AS avg_orders
     FROM customer_cohorts
     GROUP BY 1, acquisition_quarter
     ORDER BY acquisition_quarter
@@ -310,19 +406,21 @@ def load_repeat_rate_trend():
 
 
 @st.cache_data(ttl=600)
-def load_top_customers():
-    return _run_query("""
+def load_top_customers(platform="All"):
+    rev, ord_, where = _platform_cols(platform)
+    return _run_query(f"""
     SELECT
         email,
-        lifetime_orders,
-        ROUND(lifetime_revenue, 2) AS lifetime_revenue,
+        {ord_} AS lifetime_orders,
+        ROUND({rev}, 2) AS lifetime_revenue,
         DATE(first_order) AS first_order,
         DATE(last_order) AS last_order,
         woo_orders,
         shopify_orders,
         refunded_orders
     FROM `artful-logic-475116-p1.marts.vw_d2c_customer_ltv`
-    ORDER BY lifetime_revenue DESC
+    {where}
+    ORDER BY {rev} DESC
     LIMIT 50
     """)
 
@@ -348,7 +446,7 @@ def render_metric(value, label, style="primary", sub=None):
 
 def main():
     st.markdown("""
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
         <div>
             <h1 class="dashboard-header">D2C Customer LTV</h1>
             <p class="dashboard-subtitle">WooCommerce (2023-2025) + Shopify (2025+) &mdash; Unified Customer Lifetime Value</p>
@@ -356,8 +454,18 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
+    # --- Platform Filter ---
+    platform = st.radio(
+        "Platform",
+        ["All", "WooCommerce", "Shopify"],
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
     try:
-        summary = load_ltv_summary()
+        summary = load_ltv_summary(platform)
     except Exception as e:
         st.error(f"Error loading data: {e}")
         return
@@ -383,7 +491,8 @@ def main():
     # --- KPI Row ---
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     with c1:
-        st.markdown(render_metric(f"${total_revenue/1e6:.1f}M", "Lifetime Revenue"), unsafe_allow_html=True)
+        rev_display = f"${total_revenue/1e6:.1f}M" if total_revenue >= 1e6 else f"${total_revenue/1e3:.0f}K"
+        st.markdown(render_metric(rev_display, "Lifetime Revenue"), unsafe_allow_html=True)
     with c2:
         st.markdown(render_metric(f"{total_customers:,.0f}", "Unique Customers", style="teal"), unsafe_allow_html=True)
     with c3:
@@ -393,23 +502,36 @@ def main():
     with c5:
         st.markdown(render_metric(f"{repeat_rate:.1f}%", "Repeat Rate", style="teal", sub=f"{repeat_customers:,.0f} repeat"), unsafe_allow_html=True)
     with c6:
-        st.markdown(render_metric(f"{cross_platform:,.0f}", "Cross-Platform", style="gold", sub="Woo + Shopify"), unsafe_allow_html=True)
+        if platform == "All":
+            st.markdown(render_metric(f"{cross_platform:,.0f}", "Cross-Platform", style="gold", sub="Woo + Shopify"), unsafe_allow_html=True)
+        else:
+            lifespan = _f(s['avg_lifespan_days'])
+            st.markdown(render_metric(f"{lifespan:.0f}d", "Avg Lifespan", style="gold", sub="days between orders"), unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     # --- Platform Insight Banner ---
-    woo_pct = woo_revenue / total_revenue * 100 if total_revenue else 0
-    shopify_pct = 100 - woo_pct
-    st.markdown(f"""
-    <div class="insight-banner">
-        <strong style="color: #f093fb;">Platform Split:</strong>
-        <span style="color: {COLORS['woo']}; margin-left: 12px;">WooCommerce</span>
-        ${woo_revenue/1e6:.1f}M ({woo_pct:.0f}%) &bull; {woo_customers:,.0f} customers
-        &nbsp;&nbsp;|&nbsp;&nbsp;
-        <span style="color: {COLORS['shopify']};">Shopify</span>
-        ${shopify_revenue/1e6:.1f}M ({shopify_pct:.0f}%) &bull; {shopify_customers:,.0f} customers
-    </div>
-    """, unsafe_allow_html=True)
+    if platform == "All":
+        woo_pct = woo_revenue / total_revenue * 100 if total_revenue else 0
+        shopify_pct = 100 - woo_pct
+        st.markdown(f"""
+        <div class="insight-banner">
+            <strong style="color: #f093fb;">Platform Split:</strong>
+            <span style="color: {COLORS['woo']}; margin-left: 12px;">WooCommerce</span>
+            ${woo_revenue/1e6:.1f}M ({woo_pct:.0f}%) &bull; {woo_customers:,.0f} customers
+            &nbsp;&nbsp;|&nbsp;&nbsp;
+            <span style="color: {COLORS['shopify']};">Shopify</span>
+            ${shopify_revenue/1e6:.1f}M ({shopify_pct:.0f}%) &bull; {shopify_customers:,.0f} customers
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        color = COLORS['woo'] if platform == "WooCommerce" else COLORS['shopify']
+        st.markdown(f"""
+        <div class="insight-banner">
+            <strong style="color: {color};">Showing: {platform} only</strong>
+            &nbsp;&mdash;&nbsp;{total_customers:,.0f} customers &bull; ${total_revenue/1e6:.1f}M revenue &bull; {cross_platform:,.0f} also on {'Shopify' if platform == 'WooCommerce' else 'WooCommerce'}
+        </div>
+        """, unsafe_allow_html=True)
 
     # --- Tabs ---
     tab1, tab2, tab3, tab4 = st.tabs(["Revenue Timeline", "LTV Distribution", "Cohort Retention", "Top Customers"])
@@ -427,15 +549,21 @@ def main():
         if not monthly.empty:
             monthly['month'] = pd.to_datetime(monthly['month'])
 
+            # Filter by platform if needed
+            if platform != "All":
+                monthly = monthly[monthly['platform'] == platform].copy()
+
             fig = go.Figure()
-            for platform, color in [('WooCommerce', COLORS['woo']), ('Shopify', COLORS['shopify'])]:
-                df = monthly[monthly['platform'] == platform]
+            platforms_to_show = [platform] if platform != "All" else ['WooCommerce', 'Shopify']
+            for plat in platforms_to_show:
+                color = COLORS['woo'] if plat == 'WooCommerce' else COLORS['shopify']
+                df = monthly[monthly['platform'] == plat]
                 fig.add_trace(go.Bar(
                     x=df['month'],
                     y=df['revenue'].astype(float),
-                    name=platform,
+                    name=plat,
                     marker_color=color,
-                    hovertemplate='%{x|%b %Y}<br>$%{y:,.0f}<extra>' + platform + '</extra>'
+                    hovertemplate='%{x|%b %Y}<br>$%{y:,.0f}<extra>' + plat + '</extra>'
                 ))
 
             apply_dark_theme(fig, height=400,
@@ -449,16 +577,17 @@ def main():
             # Orders trend
             st.markdown('<p class="section-header">Monthly Order Volume</p>', unsafe_allow_html=True)
             fig2 = go.Figure()
-            for platform, color in [('WooCommerce', COLORS['woo']), ('Shopify', COLORS['shopify'])]:
-                df = monthly[monthly['platform'] == platform]
+            for plat in platforms_to_show:
+                color = COLORS['woo'] if plat == 'WooCommerce' else COLORS['shopify']
+                df = monthly[monthly['platform'] == plat]
                 fig2.add_trace(go.Scatter(
                     x=df['month'],
                     y=df['orders'].astype(float),
-                    name=platform,
+                    name=plat,
                     mode='lines+markers',
                     line=dict(color=color, width=2),
                     marker=dict(size=5),
-                    hovertemplate='%{x|%b %Y}<br>%{y:,.0f} orders<extra>' + platform + '</extra>'
+                    hovertemplate='%{x|%b %Y}<br>%{y:,.0f} orders<extra>' + plat + '</extra>'
                 ))
 
             apply_dark_theme(fig2, height=300,
@@ -472,7 +601,7 @@ def main():
         st.markdown('<p class="section-header">Customer LTV Distribution</p>', unsafe_allow_html=True)
 
         try:
-            dist = load_ltv_distribution()
+            dist = load_ltv_distribution(platform)
         except Exception as e:
             st.error(f"Error: {e}")
             dist = pd.DataFrame()
@@ -533,7 +662,7 @@ def main():
         # Repeat rate by acquisition cohort
         st.markdown('<p class="section-header">Repeat Rate by Acquisition Quarter</p>', unsafe_allow_html=True)
         try:
-            repeat_df = load_repeat_rate_trend()
+            repeat_df = load_repeat_rate_trend(platform)
         except Exception as e:
             st.error(f"Error: {e}")
             repeat_df = pd.DataFrame()
@@ -579,7 +708,7 @@ def main():
         st.markdown('<p class="section-header">Cohort Retention Heatmap</p>', unsafe_allow_html=True)
 
         try:
-            cohort_df = load_cohort_data()
+            cohort_df = load_cohort_data(platform)
         except Exception as e:
             st.error(f"Error: {e}")
             cohort_df = pd.DataFrame()
@@ -677,7 +806,7 @@ def main():
         st.markdown('<p class="section-header">Top 50 Customers by Lifetime Revenue</p>', unsafe_allow_html=True)
 
         try:
-            top_df = load_top_customers()
+            top_df = load_top_customers(platform)
         except Exception as e:
             st.error(f"Error: {e}")
             top_df = pd.DataFrame()
