@@ -211,12 +211,12 @@ def main():
 
         st.markdown("""
         <div class="dashboard-card">
-            <div class="card-icon">📈</div>
-            <div class="card-title">Market Intelligence</div>
+            <div class="card-icon">🥤</div>
+            <div class="card-title">Beverage Trends</div>
             <div class="card-description">
-                CT cannabis market trends, THC beverage competitive landscape, seasonality analysis.
+                Social + web trend signals for functional and THC beverages. Trending flavors, viral brands, staying-power scoring, discovery feed.
                 <br><br>
-                <strong>Key Metrics:</strong> Weekly Sales $5.5M, Avg Price $32, Market Share
+                <strong>Key Metrics:</strong> 28d growth rate, 48h viral spike, staying power 0-100
             </div>
         </div>
         """, unsafe_allow_html=True)
