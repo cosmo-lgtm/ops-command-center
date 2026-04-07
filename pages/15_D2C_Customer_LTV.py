@@ -7,7 +7,7 @@ Cohort analysis, retention, platform migration tracking.
 import streamlit as st
 import pandas as pd
 from google.cloud import bigquery
-from datetime import datetime
+from datetime import datetime, date
 import plotly.graph_objects as go
 import plotly.express as px
 import numpy as np
@@ -213,6 +213,139 @@ def _platform_cols(platform):
     elif platform == "Shopify":
         return "shopify_revenue", "shopify_orders", "WHERE shopify_orders > 0"
     return "lifetime_revenue", "lifetime_orders", ""
+
+
+def compute_mature_ltv(cohort_df, horizon_months, as_of_date):
+    """
+    Customer-weighted LTV over cohorts that have fully baked through `horizon_months`.
+
+    A cohort qualifies iff parse(cohort, 'YYYY-MM') + horizon_months
+    <= DATE_TRUNC(as_of_date, MONTH). The comparison is <=, so a cohort
+    whose first month is exactly `horizon_months` calendar months before the
+    current month qualifies.
+
+    The formula is the customer-weighted-average identity (Joe's "SUMPRODUCT"):
+        ltv = SUM(cohort_revenue_through_M-1) / SUM(cohort_size)
+
+    Args:
+        cohort_df: DataFrame from load_cohort_data() with columns
+            ['cohort', 'months_since_first', 'customers', 'revenue', ...].
+            `cohort` is a 'YYYY-MM' string.
+        horizon_months: 6 or 12.
+        as_of_date: datetime.date — the reference date for the maturity cutoff.
+
+    Returns:
+        dict with keys:
+            ltv (float), qualifying_cohorts (int),
+            earliest_cohort (str | None), latest_cohort (str | None),
+            total_customers (int), total_revenue (float)
+    """
+    empty = {
+        'ltv': 0.0,
+        'qualifying_cohorts': 0,
+        'earliest_cohort': None,
+        'latest_cohort': None,
+        'total_customers': 0,
+        'total_revenue': 0.0,
+    }
+    if cohort_df is None or cohort_df.empty:
+        return empty
+
+    df = cohort_df.copy()
+    df['cohort_period'] = pd.PeriodIndex(df['cohort'], freq='M')
+    as_of_period = pd.Period(pd.Timestamp(as_of_date), freq='M')
+    cutoff_period = as_of_period - horizon_months
+
+    qualifying_cohorts = df[df['cohort_period'] <= cutoff_period]['cohort_period'].unique()
+    if len(qualifying_cohorts) == 0:
+        return empty
+
+    qual_mask = df['cohort_period'].isin(qualifying_cohorts)
+    # Numerator: revenue from qualifying cohorts in months [0, horizon_months - 1]
+    rev_mask = qual_mask & df['months_since_first'].between(0, horizon_months - 1)
+    total_revenue = float(df.loc[rev_mask, 'revenue'].sum())
+
+    # Denominator: M0 customer counts across qualifying cohorts
+    m0_mask = qual_mask & (df['months_since_first'] == 0)
+    total_customers = int(df.loc[m0_mask, 'customers'].sum())
+
+    if total_customers == 0:
+        return empty
+
+    sorted_cohorts = sorted(str(p) for p in qualifying_cohorts)
+    return {
+        'ltv': total_revenue / total_customers,
+        'qualifying_cohorts': len(qualifying_cohorts),
+        'earliest_cohort': sorted_cohorts[0],
+        'latest_cohort': sorted_cohorts[-1],
+        'total_customers': total_customers,
+        'total_revenue': total_revenue,
+    }
+
+
+def compute_cumulative_matrix(cohort_df, as_of_date):
+    """
+    Cohort x months_since_first matrix of cumulative $ per customer.
+
+    Cells where parse(cohort, 'YYYY-MM') + m months > (month-start of as_of_date - 1 month)
+    are set to NaN (unbaked), producing a triangular heatmap.
+
+    Args:
+        cohort_df: DataFrame from load_cohort_data() with columns
+            ['cohort', 'months_since_first', 'customers', 'revenue', ...].
+        as_of_date: datetime.date — reference date for the bake line.
+
+    Returns:
+        pd.DataFrame indexed by cohort label ('YYYY-MM' string, oldest first),
+        columns are months_since_first (int, 0..max), values are cumulative
+        $/customer (float) or NaN for unbaked cells.
+        Returns empty DataFrame if cohort_df is empty.
+    """
+    if cohort_df is None or cohort_df.empty:
+        return pd.DataFrame()
+
+    df = cohort_df.copy()
+
+    # Cohort sizes (M0 customer counts)
+    sizes = (
+        df[df['months_since_first'] == 0]
+        .set_index('cohort')['customers']
+        .astype(float)
+    )
+    if sizes.empty:
+        return pd.DataFrame()
+
+    # Per-cell revenue pivot, fill missing M/c pairs with 0 so cumsum is well-defined
+    rev_pivot = (
+        df.pivot_table(
+            index='cohort',
+            columns='months_since_first',
+            values='revenue',
+            aggfunc='sum',
+            fill_value=0,
+        )
+        .astype(float)
+    )
+
+    # Cumulative revenue across months_since_first, then divide by cohort size
+    cum_rev = rev_pivot.cumsum(axis=1)
+    cum_per_customer = cum_rev.div(sizes, axis=0)
+
+    # Sort oldest -> newest by cohort label (YYYY-MM strings sort correctly)
+    cum_per_customer = cum_per_customer.sort_index()
+
+    # Bake-line masking: cell (c, m) is baked iff (cohort c + m months) is a
+    # month that has fully elapsed, i.e. <= the last complete month before as_of_date.
+    as_of_period = pd.Period(pd.Timestamp(as_of_date), freq='M')
+    last_complete_month = as_of_period - 1  # previous full month
+    cohort_periods = pd.PeriodIndex(cum_per_customer.index, freq='M')
+    for m in cum_per_customer.columns:
+        cell_periods = cohort_periods + int(m)
+        unbaked = cell_periods > last_complete_month
+        if unbaked.any():
+            cum_per_customer.loc[unbaked, m] = np.nan
+
+    return cum_per_customer
 
 
 # --- Data Loaders ---
@@ -477,9 +610,6 @@ def main():
     s = summary.iloc[0]
     total_revenue = _f(s['total_revenue'])
     total_customers = _f(s['total_customers'])
-    avg_ltv = _f(s['avg_ltv'])
-    median_ltv = _f(s['median_ltv'])
-    avg_orders = _f(s['avg_orders'])
     repeat_customers = _f(s['repeat_customers'])
     cross_platform = _f(s['cross_platform'])
     woo_revenue = _f(s['woo_revenue'])
@@ -487,6 +617,23 @@ def main():
     woo_customers = _f(s['woo_customers'])
     shopify_customers = _f(s['shopify_customers'])
     repeat_rate = (repeat_customers / total_customers * 100) if total_customers else 0
+
+    # Load cohort data once — feeds both the new mature-LTV KPI cards
+    # and the Cohort Retention tab. Cached at the loader level.
+    try:
+        cohort_df = load_cohort_data(platform)
+    except Exception as e:
+        st.error(f"Error loading cohort data: {e}")
+        cohort_df = pd.DataFrame()
+
+    today = date.today()
+    ltv_6mo = compute_mature_ltv(cohort_df, 6, today)
+    ltv_12mo = compute_mature_ltv(cohort_df, 12, today)
+
+    def _fmt_ltv_sub(r):
+        if r['qualifying_cohorts'] == 0:
+            return "no mature cohorts"
+        return f"{r['qualifying_cohorts']} cohorts · {r['earliest_cohort']} → {r['latest_cohort']}"
 
     # --- KPI Row ---
     c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -496,17 +643,17 @@ def main():
     with c2:
         st.markdown(render_metric(f"{total_customers:,.0f}", "Unique Customers", style="teal"), unsafe_allow_html=True)
     with c3:
-        st.markdown(render_metric(f"${avg_ltv:.0f}", "Avg LTV", style="gold", sub=f"Median: ${median_ltv:.0f}"), unsafe_allow_html=True)
+        st.markdown(render_metric(f"${ltv_6mo['ltv']:.0f}", "6-Month LTV", style="gold", sub=_fmt_ltv_sub(ltv_6mo)), unsafe_allow_html=True)
     with c4:
-        st.markdown(render_metric(f"{avg_orders:.1f}", "Avg Orders", style="blue"), unsafe_allow_html=True)
+        st.markdown(render_metric(f"${ltv_12mo['ltv']:.0f}", "12-Month LTV", sub=_fmt_ltv_sub(ltv_12mo)), unsafe_allow_html=True)
     with c5:
         st.markdown(render_metric(f"{repeat_rate:.1f}%", "Repeat Rate", style="teal", sub=f"{repeat_customers:,.0f} repeat"), unsafe_allow_html=True)
     with c6:
         if platform == "All":
-            st.markdown(render_metric(f"{cross_platform:,.0f}", "Cross-Platform", style="gold", sub="Woo + Shopify"), unsafe_allow_html=True)
+            st.markdown(render_metric(f"{cross_platform:,.0f}", "Cross-Platform", style="blue", sub="Woo + Shopify"), unsafe_allow_html=True)
         else:
             lifespan = _f(s['avg_lifespan_days'])
-            st.markdown(render_metric(f"{lifespan:.0f}d", "Avg Lifespan", style="gold", sub="days between orders"), unsafe_allow_html=True)
+            st.markdown(render_metric(f"{lifespan:.0f}d", "Avg Lifespan", style="blue", sub="days between orders"), unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -707,11 +854,7 @@ def main():
     with tab3:
         st.markdown('<p class="section-header">Cohort Retention Heatmap</p>', unsafe_allow_html=True)
 
-        try:
-            cohort_df = load_cohort_data(platform)
-        except Exception as e:
-            st.error(f"Error: {e}")
-            cohort_df = pd.DataFrame()
+        # cohort_df was loaded above for the KPI row — reuse it here
 
         if not cohort_df.empty:
             # Build retention matrix
@@ -762,6 +905,66 @@ def main():
                         margin=dict(l=80, r=20, t=20, b=60)
                     )
                     st.plotly_chart(fig, use_container_width=True)
+
+            # --- Cumulative $ / customer matrix (Joe's ask, 2026-04-07) ---
+            st.markdown('<p class="section-header">Cumulative Revenue per Customer by Cohort</p>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="insight-banner" style="border-left-color: #ffd666;">'
+                '<strong style="color: #ffd666;">Mature-cohort view:</strong> '
+                'cells show cumulative $/customer from M0 through M_n. '
+                'Blank cells past the diagonal are cohorts that have not yet baked through that month — '
+                'comparing them to fully-elapsed cohorts would understate LTV.'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+            cum_matrix = compute_cumulative_matrix(cohort_df, date.today())
+            # Drop tiny cohorts (<50 customers at M0) to match retention heatmap's noise floor
+            if not cum_matrix.empty and 0 in pivot.columns:
+                cum_matrix = cum_matrix.loc[cum_matrix.index.isin(pivot[pivot[0] > 50].index)]
+
+            if not cum_matrix.empty:
+                z_vals = cum_matrix.values.astype(float)
+                # Format cells: $X for <1000, $X.XK for >=1000
+                def _fmt_cell(v):
+                    if pd.isna(v):
+                        return ''
+                    if v >= 1000:
+                        return f'${v/1000:.1f}K'
+                    return f'${v:.0f}'
+                z_text = np.array([[_fmt_cell(v) for v in row] for row in z_vals])
+
+                fig_cum = go.Figure(data=go.Heatmap(
+                    z=z_vals,
+                    x=[f'M{i}' for i in cum_matrix.columns],
+                    y=cum_matrix.index.tolist(),
+                    colorscale=[
+                        [0, '#0f0f1a'],
+                        [0.05, '#1a1a3e'],
+                        [0.15, '#2a2a6a'],
+                        [0.3, '#667eea'],
+                        [0.5, '#f093fb'],
+                        [1.0, '#f5576c'],
+                    ],
+                    text=z_text,
+                    texttemplate='%{text}',
+                    textfont=dict(size=9, color='#ccd6f6'),
+                    hovertemplate='Cohort: %{y}<br>Month: %{x}<br>Cumulative $/customer: $%{z:,.2f}<extra></extra>',
+                    hoverongaps=False,
+                    colorbar=dict(
+                        title=dict(text='$ / customer', font=dict(color='#8892b0')),
+                        tickfont=dict(color='#8892b0'),
+                    ),
+                ))
+
+                apply_dark_theme(
+                    fig_cum,
+                    height=max(400, len(cum_matrix) * 22),
+                    xaxis={'title': 'Months Since First Purchase', 'side': 'bottom'},
+                    yaxis={'title': '', 'autorange': 'reversed'},
+                    margin=dict(l=80, r=20, t=20, b=60),
+                )
+                st.plotly_chart(fig_cum, use_container_width=True)
 
             # Revenue per customer by cohort
             st.markdown('<p class="section-header">Revenue per Customer by Cohort Month</p>', unsafe_allow_html=True)
