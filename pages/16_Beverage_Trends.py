@@ -48,27 +48,42 @@ NOWADAYS_CSS = """
   --navy:   #074A7A;
 }
 
-div[data-testid="stAppViewContainer"] .main {
+/* Apply Jost globally on this page — Streamlit's modern DOM uses
+   stAppViewContainer / stMain / stMainBlockContainer, not the old
+   section.main + .block-container hierarchy. Targeting the stApp
+   wrapper catches both the container and every nested emotion class
+   without relying on the volatile class hashes. */
+[data-testid="stAppViewContainer"],
+[data-testid="stAppViewContainer"] *,
+[data-testid="stMain"],
+[data-testid="stMain"] *,
+[data-testid="stMarkdownContainer"],
+[data-testid="stMarkdownContainer"] * {
+  font-family: 'Jost', 'Helvetica', sans-serif !important;
+}
+
+[data-testid="stApp"] {
   background: linear-gradient(135deg, var(--mist) 0%, var(--white) 60%, var(--cream) 200%) !important;
 }
 
-section.main > div.block-container {
+[data-testid="stMainBlockContainer"] {
   max-width: 100% !important;
   padding-top: 1.5rem !important;
   padding-left: 2rem !important;
   padding-right: 2rem !important;
-  font-family: 'Jost', 'Helvetica', sans-serif !important;
 }
 
-section.main h1, section.main h2, section.main h3, section.main h4 {
-  font-family: 'Jost', 'Helvetica', sans-serif !important;
+[data-testid="stMain"] h1,
+[data-testid="stMain"] h2,
+[data-testid="stMain"] h3,
+[data-testid="stMain"] h4 {
   color: var(--char) !important;
   letter-spacing: -0.01em;
 }
 
-section.main p, section.main span, section.main div, section.main label,
-section.main .stMarkdown {
-  font-family: 'Jost', 'Helvetica', sans-serif !important;
+[data-testid="stMain"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stMain"] [data-testid="stMarkdownContainer"] span,
+[data-testid="stMain"] [data-testid="stMarkdownContainer"] div {
   color: var(--char);
 }
 
@@ -288,10 +303,20 @@ def _run(sql: str) -> pd.DataFrame:
 
 
 def _safe(sql: str, empty_cols: list[str]) -> pd.DataFrame:
+    """Run a query and return an empty DataFrame on any failure.
+
+    We deliberately swallow BQ errors silently here and let the per-section
+    empty-state UI ("No data yet — harvest needs a few cycles") handle the
+    rendering. Surfacing raw BQ exception text as red banners created a wall
+    of noise before the harvest had written its first row. The exception is
+    still logged to stderr so it shows up in Streamlit Cloud logs for
+    debugging without polluting the dashboard UI.
+    """
     try:
         return _run(sql)
     except Exception as exc:  # noqa: BLE001
-        st.warning(f"Data temporarily unavailable: {exc}")
+        import sys
+        print(f"[beverage-trends] query failed: {exc}", file=sys.stderr)
         return pd.DataFrame(columns=empty_cols)
 
 
@@ -399,9 +424,14 @@ def load_last_refresh() -> datetime | None:
         """,
         ["last_refresh"],
     )
-    if df.empty or df.iloc[0]["last_refresh"] is None:
+    if df.empty:
         return None
-    return pd.to_datetime(df.iloc[0]["last_refresh"]).to_pydatetime()
+    val = df.iloc[0]["last_refresh"]
+    # BQ returns NULL → pandas NaT when the table is empty; NaT is NOT the
+    # same as None and silently survives an `is None` check, so use pd.isna.
+    if pd.isna(val):
+        return None
+    return pd.to_datetime(val).to_pydatetime()
 
 
 def load_headline_mover() -> dict | None:
@@ -614,20 +644,14 @@ def _render_discovery(df: pd.DataFrame) -> None:
 
 
 def main() -> None:
-    # Header + refresh + category toggle
-    col_head, col_cat, col_refresh = st.columns([3, 2, 1.2])
+    # Header + refresh (two columns; category toggle gets its own row below so
+    # it doesn't get crushed next to the title on narrower viewports).
+    col_head, col_refresh = st.columns([4, 2])
     with col_head:
         st.markdown(
             "<h1 style='margin:0; font-size:2.4rem; font-weight:700;'>🥤 Beverage Trends</h1>"
             "<div style='color:#555; margin-top:4px;'>Functional + THC beverage signal harvested from web + social</div>",
             unsafe_allow_html=True,
-        )
-    with col_cat:
-        category = st.radio(
-            "Category",
-            ["All beverages", "Functional", "THC / intoxicating"],
-            horizontal=True,
-            label_visibility="collapsed",
         )
     with col_refresh:
         last_refresh = load_last_refresh()
@@ -643,6 +667,14 @@ def main() -> None:
             f"</div>",
             unsafe_allow_html=True,
         )
+
+    # Category toggle on its own row — full width, no cramping.
+    category = st.radio(
+        "Category",
+        ["All beverages", "Functional", "THC / intoxicating"],
+        horizontal=True,
+        label_visibility="collapsed",
+    )
 
     # The category toggle is a lightweight hint for future filtering; views
     # don't slice by category yet (it's driven from the entities.category
