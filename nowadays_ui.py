@@ -176,6 +176,56 @@ EDITORIAL_CSS = """
 .stDeployButton { display: none !important; }
 
 /* ----------------------------------------------------------------------
+   SIDEBAR — editorial light theme override
+   The Streamlit theme in .streamlit/config.toml is dark for legacy
+   dashboards. Editorial pages (those that call inject_editorial_style)
+   override the sidebar to a light cream gradient with charcoal text and
+   a charcoal pill for the active page. Legacy dark pages don't import
+   nowadays_ui so their dark sidebar stays untouched.
+   ---------------------------------------------------------------------- */
+
+[data-testid="stSidebar"] {
+  background: linear-gradient(180deg, var(--nw-surface) 0%, var(--nw-surface-low) 100%) !important;
+  border-right: 1px solid var(--nw-surface-variant) !important;
+}
+[data-testid="stSidebar"] *:not(.material-symbols-outlined) {
+  color: var(--nw-char) !important;
+  font-family: 'Jost', 'Helvetica', sans-serif !important;
+}
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] {
+  padding-top: 1rem;
+}
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] ul li a {
+  border-radius: 12px !important;
+  padding: 10px 16px !important;
+  margin: 2px 8px !important;
+  font-weight: 600 !important;
+  font-size: 0.9rem !important;
+  transition: background 0.15s ease;
+}
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] ul li a:hover {
+  background: var(--nw-surface-variant) !important;
+}
+/* Active page pill — charcoal background with white text */
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] ul li a[aria-current="page"] {
+  background: var(--nw-char) !important;
+}
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] ul li a[aria-current="page"] * {
+  color: #ffffff !important;
+}
+/* Sidebar header / app name area */
+[data-testid="stSidebarHeader"] {
+  padding: 1.25rem 1rem !important;
+}
+[data-testid="stSidebarHeader"] h1,
+[data-testid="stSidebarHeader"] h2 {
+  font-family: 'Jost', sans-serif !important;
+  color: var(--nw-char) !important;
+  font-size: 1.1rem !important;
+  letter-spacing: -0.01em;
+}
+
+/* ----------------------------------------------------------------------
    PAGE HEADER + DASHBOARD CONTROL BAR
    ---------------------------------------------------------------------- */
 
