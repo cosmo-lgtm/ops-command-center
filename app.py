@@ -34,9 +34,44 @@ st.markdown(
 <style>
 .nw-launcher-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 28px;
-  margin-top: 16px;
+  margin-top: 0;
+}
+/* Per-section column counts so each row sizes evenly to its content,
+   no orphan cards on the last row. Fallback for 5+ cards is auto-fit. */
+.nw-launcher-grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.nw-launcher-grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.nw-launcher-grid.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.nw-launcher-grid.cols-many { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+
+/* Category section header (above each grouped grid) */
+.nw-launcher-section {
+  margin-top: 40px;
+}
+.nw-launcher-section:first-of-type { margin-top: 12px; }
+.nw-launcher-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 18px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--nw-surface-variant);
+}
+.nw-launcher-section-title {
+  font-size: 1.35rem !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.02em !important;
+  color: var(--nw-char) !important;
+  margin: 0 !important;
+  font-family: 'Jost', 'Helvetica', sans-serif !important;
+}
+.nw-launcher-section-count {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--nw-outline);
+  font-family: 'Jost', 'Helvetica', sans-serif !important;
 }
 .nw-launcher-card {
   background: var(--nw-surface-lowest);
@@ -245,17 +280,17 @@ def _render_launcher_card(slug: str, icon: str, icon_color: str, title: str, des
     """Build the HTML for one launcher tile. Returns the HTML string so the
     caller can compose them inside the grid container.
 
-    The card is wrapped in an <a> targeting the multi-page route so the
-    entire tile is clickable. Streamlit serves multi-page apps at /<page_slug>
-    relative to the app root.
+    Category is intentionally NOT rendered on the card itself — the
+    section header above the grid carries that signal, so repeating it
+    on every tile would be visual noise.
     """
+    _ = category  # carried by section header, not the tile
     return (
         f"<a class='nw-launcher-card' href='./{slug}' target='_self'>"
         "<div class='nw-launcher-head'>"
         f"<div class='nw-launcher-icon {icon_color}'>"
         f"<span class='material-symbols-outlined' style='font-size:28px;'>{icon}</span>"
         "</div>"
-        f"<span class='nw-launcher-category'>{category}</span>"
         "</div>"
         f"<h3 class='nw-launcher-title'>{title}</h3>"
         f"<p class='nw-launcher-desc'>{desc}</p>"
@@ -265,6 +300,34 @@ def _render_launcher_card(slug: str, icon: str, icon_color: str, title: str, des
         "</div>"
         "</a>"
     )
+
+
+# Display order + bucket logic. Operations and Support are combined into
+# a single "Operations & Support" section because each only has one or two
+# tiles — separating them creates lonely orphan grids.
+SECTION_ORDER = [
+    ("Sales", "Sales"),
+    ("DTC", "Direct to Consumer"),
+    ("Marketing", "Marketing"),
+    ("Operations & Support", "Operations & Support"),
+]
+_OPS_SUPPORT = {"Operations", "Support"}
+
+
+def _section_for(category: str) -> str:
+    if category in _OPS_SUPPORT:
+        return "Operations & Support"
+    return category
+
+
+def _grouped_dashboards() -> dict[str, list[tuple]]:
+    """Return DASHBOARDS bucketed by display section, preserving registry
+    order within each bucket."""
+    buckets: dict[str, list[tuple]] = {key: [] for key, _ in SECTION_ORDER}
+    for entry in DASHBOARDS:
+        section = _section_for(entry[5])  # category is the 6th tuple element
+        buckets[section].append(entry)
+    return buckets
 
 
 def main():
@@ -285,12 +348,33 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # Launcher grid
-    cards_html = "".join(_render_launcher_card(*d) for d in DASHBOARDS)
-    st.markdown(
-        f"<div class='nw-launcher-grid'>{cards_html}</div>",
-        unsafe_allow_html=True,
-    )
+    # Grouped launcher — one section per category pill
+    buckets = _grouped_dashboards()
+    section_blocks: list[str] = []
+    for key, label in SECTION_ORDER:
+        items = buckets.get(key, [])
+        if not items:
+            continue
+        cards_html = "".join(_render_launcher_card(*d) for d in items)
+        # Pick a column count so cards size evenly to the row width
+        # without orphan tiles on the last line.
+        col_class = {
+            1: "cols-2",  # one card on a 2-col grid still looks intentional
+            2: "cols-2",
+            3: "cols-3",
+            4: "cols-4",
+        }.get(len(items), "cols-many")
+        count_label = "1 dashboard" if len(items) == 1 else f"{len(items)} dashboards"
+        section_blocks.append(
+            "<div class='nw-launcher-section'>"
+            "<div class='nw-launcher-section-head'>"
+            f"<h3 class='nw-launcher-section-title'>{label}</h3>"
+            f"<span class='nw-launcher-section-count'>{count_label}</span>"
+            "</div>"
+            f"<div class='nw-launcher-grid {col_class}'>{cards_html}</div>"
+            "</div>"
+        )
+    st.markdown("".join(section_blocks), unsafe_allow_html=True)
 
     render_footer("Nowadays internal analytics · zero-cost pipelines · powered by BigQuery + Streamlit Cloud")
 
