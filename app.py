@@ -179,11 +179,6 @@ st.markdown(
 
 # (slug, icon, icon_color, title, description, category)
 DASHBOARDS = [
-    ("Data_Quality", "verified", "navy",
-     "Data Quality",
-     "VIP ↔ Salesforce alignment, match rates, duplicate detection, and data completeness across the customer master.",
-     "Operations"),
-
     ("Distributor_Inventory", "inventory_2", "green",
      "Distributor Inventory",
      "Salesforce orders vs VIP depletion — weeks of inventory, overstock and understock by distributor and SKU.",
