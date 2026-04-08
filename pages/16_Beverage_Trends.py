@@ -202,6 +202,27 @@ NOWADAYS_CSS = """
   border-radius: 999px;
 }
 
+/* Staying-power row */
+.bt-sp-row {
+  padding: 14px 0;
+  border-bottom: 1px solid rgba(45, 41, 38, 0.06);
+}
+.bt-sp-row:last-child { border-bottom: none; }
+.bt-sp-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.bt-sp-score {
+  font-weight: 700;
+  color: var(--navy);
+  font-size: 1.1rem;
+}
+.bt-sp-chips {
+  margin-top: 8px;
+}
+
 /* Staying-power bar */
 .bt-sp-bar-wrap {
   width: 100%;
@@ -346,14 +367,14 @@ def load_viral(entity_types: tuple[str, ...]) -> pd.DataFrame:
     return _safe(
         f"""
         SELECT entity_name, entity_type, recent_avg, baseline, spike_ratio,
-               recent_platforms
+               recent_platforms, recent_total
         FROM `{BQ_PROJECT}.{DATASET}.v_viral_48h`
         WHERE entity_type IN ({types_list})
         ORDER BY spike_ratio DESC
         LIMIT 10
         """,
         ["entity_name", "entity_type", "recent_avg", "baseline",
-         "spike_ratio", "recent_platforms"],
+         "spike_ratio", "recent_platforms", "recent_total"],
     )
 
 
@@ -487,10 +508,27 @@ def _render_trend_card(
                 "neg": "bt-growth-neg",
                 "viral": "bt-viral",
             }[metric_kind]
+            value = float(row[metric_key])
             if metric_kind in ("pos", "neg"):
-                chip_value = _fmt_pct(float(row[metric_key]))
+                # Bootstrap detection: during the first ~2 weeks v_trending_28d
+                # falls back to raw recent mention count as the growth_rate
+                # proxy (since there's no prior baseline yet). When we see a
+                # large integer-ish value that matches recent_7d, show the
+                # mention count instead of a fake "+10600%".
+                if "recent_7d" in row.index and abs(value - float(row["recent_7d"])) < 0.5:
+                    chip_value = f"{int(row['recent_7d'])} mentions"
+                else:
+                    chip_value = _fmt_pct(value)
             else:
-                chip_value = _fmt_spike(float(row[metric_key]))
+                # Bootstrap detection for viral: real spike_ratio is ~3-50x.
+                # The day-1 fallback multiplies recent_total * platforms / 10
+                # which can produce huge numbers. If we have baseline == 0
+                # in the data, show mention count instead.
+                if "baseline" in row.index and float(row.get("baseline", 0) or 0) == 0:
+                    recent_total = int(row.get("recent_total", value))
+                    chip_value = f"{recent_total} mentions"
+                else:
+                    chip_value = _fmt_spike(value)
             rows_html += (
                 "<div class='bt-row'>"
                 f"<div class='bt-rank'>#{i + 1}</div>"
@@ -499,15 +537,13 @@ def _render_trend_card(
                 f"<div class='{chip_class}'>{chip_value}</div>"
                 "</div>"
             )
-    st.markdown(
-        f"""
-        <div class='bt-card'>
-          <h3><span class='tile-icon {icon_class}'>{icon}</span>{title}</h3>
-          {rows_html}
-        </div>
-        """,
-        unsafe_allow_html=True,
+    card_html = (
+        "<div class='bt-card'>"
+        f"<h3><span class='tile-icon {icon_class}'>{icon}</span>{title}</h3>"
+        f"{rows_html}"
+        "</div>"
     )
+    st.markdown(card_html, unsafe_allow_html=True)
 
 
 def _render_headline(mover: dict | None) -> None:
@@ -515,32 +551,48 @@ def _render_headline(mover: dict | None) -> None:
         title_html = "No headline mover yet — waiting for data."
         sub = "The harvest needs at least a week of runs before a headline appears."
     else:
-        arrow = "up" if mover["growth_pct"] >= 0 else "down"
-        title_html = (
-            f"{mover['name']} is {arrow} "
-            f"{abs(mover['growth_pct']):.0f}% across {mover['platforms']} platforms this week"
-        )
-        sub = (
-            f"{mover['mentions']} mentions in the last 7 days · "
-            f"type: {mover['type']}"
-        )
-    st.markdown(
-        f"""
-        <div class='bt-headline'>
-          <div class='eyebrow'>This week's biggest mover</div>
-          <div class='title'>🔥 {title_html}</div>
-          <div class='sub'>{sub}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+        # During the bootstrap week v_trending_28d's growth_rate falls back
+        # to raw recent mention count (since there's no prior baseline to
+        # compute a real growth rate against). Detect that fallback case
+        # — growth_pct == mentions * 100 — and switch the copy to say
+        # "leading with N mentions" instead of "up 106000%".
+        is_bootstrap = abs(mover["growth_pct"] - (mover["mentions"] * 100)) < 1
+        if is_bootstrap:
+            title_html = (
+                f"{mover['name']} is leading with "
+                f"{mover['mentions']} mentions across {mover['platforms']} platforms this week"
+            )
+            sub = f"type: {mover['type']} · trend baselines mature after 2 weeks of harvest history"
+        else:
+            arrow = "up" if mover["growth_pct"] >= 0 else "down"
+            title_html = (
+                f"{mover['name']} is {arrow} "
+                f"{abs(mover['growth_pct']):.0f}% across {mover['platforms']} platforms this week"
+            )
+            sub = (
+                f"{mover['mentions']} mentions in the last 7 days · "
+                f"type: {mover['type']}"
+            )
+    card_html = (
+        "<div class='bt-headline'>"
+        "<div class='eyebrow'>This week's biggest mover</div>"
+        f"<div class='title'>🔥 {title_html}</div>"
+        f"<div class='sub'>{sub}</div>"
+        "</div>"
     )
+    st.markdown(card_html, unsafe_allow_html=True)
 
 
 def _render_staying_power(df: pd.DataFrame) -> None:
+    # IMPORTANT: every HTML chunk below is built as a single line with no
+    # leading whitespace. Markdown renders any 4+ space indent as a code
+    # block, and Streamlit's st.markdown runs through the markdown parser
+    # even when unsafe_allow_html=True. Multi-line indented HTML was
+    # rendering as an <pre><code> dark block here previously.
     if df.empty:
         body = "<div class='bt-row'><div></div><div class='bt-entity'>Waiting for data.</div><div></div><div></div></div>"
     else:
-        body = ""
+        body_parts: list[str] = []
         for i, row in df.reset_index(drop=True).iterrows():
             score = int(row["staying_power_score"] or 0)
             chips_html = ""
@@ -553,31 +605,31 @@ def _render_staying_power(df: pd.DataFrame) -> None:
                 chips_html += (
                     f"<span class='bt-chip {'bt-chip-on' if on else ''}'>{label}</span>"
                 )
-            body += f"""
-            <div style='padding: 14px 0; border-bottom: 1px solid rgba(45,41,38,0.06);'>
-              <div style='display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;'>
-                <div>
-                  <span class='bt-rank'>#{i + 1}</span>
-                  <span class='bt-entity' style='margin-left:10px;'>{row['entity_name']}</span>
-                  <span class='bt-type-badge' style='margin-left:8px;'>{row['entity_type']}</span>
-                </div>
-                <div style='font-weight:700; color:var(--navy); font-size:1.1rem;'>{score}/100</div>
-              </div>
-              <div class='bt-sp-bar-wrap'>
-                <div class='bt-sp-bar-fill' style='width:{score}%;'></div>
-              </div>
-              <div style='margin-top:8px;'>{chips_html}</div>
-            </div>
-            """
-    st.markdown(
-        f"""
-        <div class='bt-card'>
-          <h3><span class='tile-icon bt-icon-navy'>⏳</span>Staying Power Leaderboard</h3>
-          {body}
-        </div>
-        """,
-        unsafe_allow_html=True,
+            row_html = (
+                "<div class='bt-sp-row'>"
+                "<div class='bt-sp-head'>"
+                "<div>"
+                f"<span class='bt-rank'>#{i + 1}</span>"
+                f"<span class='bt-entity' style='margin-left:10px;'>{row['entity_name']}</span>"
+                f"<span class='bt-type-badge' style='margin-left:8px;'>{row['entity_type']}</span>"
+                "</div>"
+                f"<div class='bt-sp-score'>{score}/100</div>"
+                "</div>"
+                "<div class='bt-sp-bar-wrap'>"
+                f"<div class='bt-sp-bar-fill' style='width:{score}%;'></div>"
+                "</div>"
+                f"<div class='bt-sp-chips'>{chips_html}</div>"
+                "</div>"
+            )
+            body_parts.append(row_html)
+        body = "".join(body_parts)
+    card_html = (
+        "<div class='bt-card'>"
+        "<h3><span class='tile-icon bt-icon-navy'>⏳</span>Staying Power Leaderboard</h3>"
+        f"{body}"
+        "</div>"
     )
+    st.markdown(card_html, unsafe_allow_html=True)
 
 
 def _render_drilldown(df_trending: pd.DataFrame) -> None:
