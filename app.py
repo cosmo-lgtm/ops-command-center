@@ -214,16 +214,6 @@ DASHBOARDS = [
      "Direct-to-consumer commerce overview — orders, AOV, conversion, channel mix across Shopify and WooCommerce.",
      "DTC"),
 
-    ("Store_Locator", "store", "mist",
-     "Store Locator (POC)",
-     "Consumer-facing store finder — retailers with products ordered in the last 90 days, mapped via Google Places.",
-     "POC"),
-
-    ("Payments", "credit_card", "sky",
-     "Payments",
-     "Authorize.net payment analytics — transaction volume, card types, geographic distribution, US vs international.",
-     "DTC"),
-
     ("Marketing_Scorecard", "campaign", "yellow",
      "Marketing Scorecard",
      "Cross-channel marketing performance — paid social, email, organic, attribution, and ROAS by campaign.",
