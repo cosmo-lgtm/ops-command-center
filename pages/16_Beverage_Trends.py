@@ -146,14 +146,11 @@ NOWADAYS_CSS = """
   background-attachment: fixed !important;
 }
 
-/* Streamlit's default stMain has overflow:auto + fixed viewport height,
-   creating an inner scrollbar. For an editorial page layout we want the
-   natural document scroll instead so screenshots, anchors, and printer
-   styles all behave normally. */
-[data-testid="stMain"] {
-  overflow: visible !important;
-  height: auto !important;
-}
+/* IMPORTANT: do NOT override stMain's overflow / height. Streamlit's
+   default is overflow:auto + fixed viewport height which gives the user
+   the inner scrollbar they expect. An earlier attempt to force
+   overflow:visible broke scrolling entirely (the parent stApp clipped
+   the overflow with no scrollbar to compensate). */
 
 [data-testid="stMainBlockContainer"] {
   max-width: 1440px !important;
@@ -218,7 +215,7 @@ NOWADAYS_CSS = """
   margin-top: 2px;
 }
 
-/* Segmented control */
+/* Segmented control — pill-shaped radio for the category filter */
 [data-testid="stRadio"] [role="radiogroup"] {
   background: var(--bt-surface-low) !important;
   border-radius: 999px !important;
@@ -229,18 +226,32 @@ NOWADAYS_CSS = """
 }
 [data-testid="stRadio"] [role="radiogroup"] label {
   border-radius: 999px !important;
-  padding: 8px 22px !important;
+  padding: 10px 24px !important;
   margin: 0 !important;
-  font-weight: 600 !important;
-  font-size: 0.85rem !important;
   cursor: pointer;
   transition: background 0.18s ease;
-  font-family: 'Jost', sans-serif !important;
+  background: transparent;
+  display: inline-flex !important;
+  align-items: center;
 }
+/* Inactive label text — explicit charcoal so it reads on the cream pill */
+[data-testid="stRadio"] [role="radiogroup"] label,
+[data-testid="stRadio"] [role="radiogroup"] label *:not(input) {
+  color: var(--char) !important;
+  font-weight: 600 !important;
+  font-size: 0.85rem !important;
+  font-family: 'Jost', 'Helvetica', sans-serif !important;
+}
+/* Active label — charcoal pill background with white text. Apply white
+   to ALL descendants so the inner Streamlit-emitted spans inherit it. */
 [data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) {
   background: var(--char) !important;
-  color: var(--bt-surface-lowest) !important;
 }
+[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked),
+[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) *:not(input) {
+  color: #ffffff !important;
+}
+/* Hide the native radio dot — we want pure pill UI */
 [data-testid="stRadio"] [role="radiogroup"] label > div:first-child { display: none !important; }
 
 /* ----------------------------------------------------------------------
