@@ -194,11 +194,6 @@ DASHBOARDS = [
      "B2C customer support analytics — CSAT scores, resolution times, agent performance, and ticket backlog.",
      "Support"),
 
-    ("Hemp_Advocacy", "eco", "green",
-     "Hemp Advocacy",
-     "Hemp industry economic impact data for policymaker advocacy — market growth, jobs, tax revenue across 28 states.",
-     "Marketing"),
-
     ("Visit_Performance", "explore", "yellow",
      "Visit Performance",
      "Sales rep check-in attribution — visit-to-depletion conversion, POD growth tracking, route effectiveness.",
