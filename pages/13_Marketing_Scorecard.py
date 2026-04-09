@@ -16,6 +16,8 @@ import requests
 from bs4 import BeautifulSoup
 import json
 
+from nowadays_ui import editorial_plotly, inject_editorial_style
+
 # Page config
 st.set_page_config(
     page_title="Marketing Scorecard",
@@ -23,159 +25,10 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed"
 )
+inject_editorial_style()
 
 # Dark mode CSS
-st.markdown("""
-<style>
-    .block-container {
-        max-width: 100% !important;
-        padding-left: 2rem !important;
-        padding-right: 2rem !important;
-    }
-    .stApp {
-        background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%);
-    }
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden; height: 0px !important;}
-    .stApp > header {display: none !important;}
-    .stDeployButton {display: none !important;}
-    [data-testid="stHeader"] {display: none !important;}
-    [data-testid="stToolbar"] {display: none !important;}
-    .block-container {padding-top: 1rem !important;}
 
-    /* KPI Cards */
-    .kpi-card {
-        background: linear-gradient(145deg, #1e1e2f 0%, #2a2a4a 100%);
-        border-radius: 12px;
-        padding: 16px;
-        border: 1px solid rgba(255,255,255,0.1);
-        text-align: center;
-        min-height: 160px;
-    }
-    .kpi-metric-name {
-        font-size: 13px;
-        color: #ccd6f6;
-        font-weight: 600;
-        margin: 0 0 2px 0;
-    }
-    .kpi-owner {
-        font-size: 10px;
-        color: #8892b0;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin: 0 0 8px 0;
-    }
-    .kpi-value {
-        font-size: 28px;
-        font-weight: 700;
-        color: #00d4aa;
-        margin: 0;
-    }
-    .kpi-target {
-        font-size: 11px;
-        color: #8892b0;
-        margin: 4px 0;
-    }
-    .kpi-pct {
-        font-size: 14px;
-        font-weight: 600;
-        margin: 4px 0 6px 0;
-    }
-    .pct-green { color: #64ffda; }
-    .pct-yellow { color: #ffd666; }
-    .pct-red { color: #ff6b6b; }
-
-    /* Progress bar */
-    .progress-bg {
-        background: rgba(255,255,255,0.1);
-        border-radius: 4px;
-        height: 6px;
-        overflow: hidden;
-    }
-    .progress-fill-green {
-        background: linear-gradient(90deg, #00d4aa, #64ffda);
-        height: 100%;
-        border-radius: 4px;
-    }
-    .progress-fill-yellow {
-        background: linear-gradient(90deg, #ffa726, #ffd666);
-        height: 100%;
-        border-radius: 4px;
-    }
-    .progress-fill-red {
-        background: linear-gradient(90deg, #e53935, #ff6b6b);
-        height: 100%;
-        border-radius: 4px;
-    }
-
-    /* Weekly tracker table */
-    .tracker-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 12px;
-        color: #ccd6f6;
-    }
-    .tracker-table th {
-        background: rgba(30, 30, 47, 0.8);
-        padding: 8px 6px;
-        text-align: center;
-        font-weight: 600;
-        color: #8892b0;
-        font-size: 11px;
-        border-bottom: 1px solid rgba(255,255,255,0.1);
-        position: sticky;
-        top: 0;
-    }
-    .tracker-table th.metric-col {
-        text-align: left;
-        min-width: 180px;
-    }
-    .tracker-table td {
-        padding: 6px;
-        text-align: center;
-        border-bottom: 1px solid rgba(255,255,255,0.05);
-    }
-    .tracker-table td.metric-name {
-        text-align: left;
-        font-weight: 600;
-        color: #ccd6f6;
-    }
-    .tracker-table td.metric-owner {
-        text-align: left;
-        color: #8892b0;
-        font-size: 11px;
-    }
-    .tracker-table tr:hover {
-        background: rgba(255,255,255,0.03);
-    }
-    .current-week {
-        background: rgba(0, 212, 170, 0.1) !important;
-        border-left: 2px solid #00d4aa;
-        border-right: 2px solid #00d4aa;
-    }
-    .current-week-header {
-        background: rgba(0, 212, 170, 0.2) !important;
-        color: #00d4aa !important;
-        border-left: 2px solid #00d4aa;
-        border-right: 2px solid #00d4aa;
-    }
-
-    /* Section headers */
-    .section-header {
-        color: #ccd6f6;
-        font-size: 20px;
-        font-weight: 600;
-        margin: 24px 0 12px 0;
-        padding-bottom: 6px;
-        border-bottom: 2px solid rgba(0, 212, 170, 0.3);
-    }
-
-    /* Source badge */
-    .source-auto { color: #64ffda; font-size: 9px; }
-    .source-sheet { color: #ffd666; font-size: 9px; }
-</style>
-""", unsafe_allow_html=True)
 
 # ============================================================================
 # CONFIGURATION

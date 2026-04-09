@@ -9,6 +9,8 @@ from google.cloud import bigquery
 from datetime import datetime
 import plotly.graph_objects as go
 
+from nowadays_ui import editorial_plotly, inject_editorial_style
+
 # Page config
 st.set_page_config(
     page_title="Visit Performance",
@@ -16,149 +18,16 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+inject_editorial_style()
 
 # Dark mode custom CSS with responsive design
-st.markdown("""
-<style>
-    /* Force wide layout */
-    .block-container {
-        max-width: 100% !important;
-        padding-left: 2rem !important;
-        padding-right: 2rem !important;
-    }
 
-    .stApp {
-        background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%);
-    }
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden; height: 0px !important;}
-    .stApp > header {display: none !important;}
-    .stDeployButton {display: none !important;}
-    [data-testid="stHeader"] {display: none !important;}
-    [data-testid="stToolbar"] {display: none !important;}
-    .block-container {padding-top: 1rem !important;}
-
-    /* Base styles (mobile-first) */
-    .metric-card {
-        background: linear-gradient(145deg, #1e1e2f 0%, #2a2a4a 100%);
-        border-radius: 12px;
-        padding: 16px;
-        border: 1px solid rgba(255,255,255,0.1);
-        box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-        margin-bottom: 12px;
-    }
-    .metric-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 12px 40px rgba(0,0,0,0.4);
-    }
-    .metric-value { font-size: clamp(1.5rem, 4vw, 2.25rem); font-weight: 700; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; }
-    .metric-value-green { font-size: clamp(1.5rem, 4vw, 2.25rem); font-weight: 700; background: linear-gradient(135deg, #64ffda 0%, #00bfa5 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; }
-    .metric-value-gold { font-size: clamp(1.5rem, 4vw, 2.25rem); font-weight: 700; background: linear-gradient(135deg, #ffd666 0%, #f39c12 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; }
-    .metric-value-red { font-size: clamp(1.5rem, 4vw, 2.25rem); font-weight: 700; background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; }
-    .metric-label { font-size: clamp(0.7rem, 1.5vw, 0.875rem); color: #8892b0; text-transform: uppercase; letter-spacing: 1px; margin-top: 6px; }
-    .metric-sublabel { font-size: clamp(0.65rem, 1.2vw, 0.75rem); color: #5a6785; margin-top: 4px; }
-
-    .dashboard-header { background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: clamp(1.75rem, 5vw, 2.625rem); font-weight: 800; margin-bottom: 8px; }
-    .dashboard-subtitle { color: #8892b0; font-size: clamp(0.875rem, 2vw, 1rem); margin-bottom: 24px; }
-    .section-header { color: #ccd6f6; font-size: clamp(1.1rem, 2.5vw, 1.375rem); font-weight: 600; margin: 24px 0 12px 0; padding-bottom: 8px; border-bottom: 2px solid rgba(102, 126, 234, 0.3); }
-
-    .leaderboard-card {
-        background: linear-gradient(145deg, #1e1e2f 0%, #2a2a4a 100%);
-        border-radius: 12px;
-        padding: clamp(12px, 2vw, 16px);
-        border: 1px solid rgba(255,255,255,0.08);
-        margin-bottom: 8px;
-    }
-    .leaderboard-rank { font-size: clamp(1.25rem, 3vw, 1.5rem); font-weight: 700; color: #ccd6f6; width: 40px; display: inline-block; }
-    .leaderboard-rank-gold { color: #ffd666; }
-    .leaderboard-rank-silver { color: #c0c0c0; }
-    .leaderboard-rank-bronze { color: #cd7f32; }
-    .leaderboard-name { color: #ccd6f6; font-weight: 600; font-size: clamp(0.9rem, 2vw, 1rem); }
-    .leaderboard-stats { color: #8892b0; font-size: clamp(0.7rem, 1.5vw, 0.75rem); margin-top: 4px; }
-
-    /* BAN metrics in leaderboard cards */
-    .leaderboard-card .ban-metrics {
-        display: flex;
-        gap: clamp(8px, 2vw, 16px);
-        margin-top: 8px;
-        flex-wrap: wrap;
-    }
-    .leaderboard-card .ban-metric {
-        text-align: center;
-        min-width: 50px;
-    }
-    .leaderboard-card .ban-value {
-        font-size: clamp(1rem, 2vw, 1.25rem);
-        font-weight: 700;
-    }
-    .leaderboard-card .ban-label {
-        font-size: clamp(0.55rem, 1vw, 0.65rem);
-        color: #8892b0;
-        text-transform: uppercase;
-    }
-
-    .attribution-badge { background: linear-gradient(135deg, #64ffda 0%, #00bfa5 100%); color: #0f0f1a; padding: 3px 10px; border-radius: 20px; font-size: clamp(0.6rem, 1.2vw, 0.7rem); font-weight: 700; margin-left: 8px; }
-    .pod-badge { background: linear-gradient(135deg, #ffd666 0%, #f39c12 100%); color: #0f0f1a; padding: 3px 10px; border-radius: 20px; font-size: clamp(0.6rem, 1.2vw, 0.7rem); font-weight: 700; margin-left: 8px; }
-
-    .live-indicator { display: inline-flex; align-items: center; gap: 8px; color: #64ffda; font-size: clamp(0.65rem, 1.5vw, 0.75rem); text-transform: uppercase; letter-spacing: 1px; }
-    .live-dot { width: 8px; height: 8px; background: #64ffda; border-radius: 50%; animation: pulse 2s infinite; }
-    @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.2); } }
-
-    /* Tablet breakpoint */
-    @media (max-width: 992px) {
-        .block-container {
-            padding-left: 1rem !important;
-            padding-right: 1rem !important;
-        }
-    }
-
-    /* Mobile breakpoint */
-    @media (max-width: 640px) {
-        .block-container {
-            padding-left: 0.5rem !important;
-            padding-right: 0.5rem !important;
-        }
-        .metric-card {
-            padding: 12px;
-            border-radius: 8px;
-        }
-        .leaderboard-card .ban-metrics {
-            gap: 12px;
-        }
-    }
-</style>
-""", unsafe_allow_html=True)
 
 COLORS = {'primary': '#667eea', 'secondary': '#764ba2', 'success': '#64ffda', 'warning': '#ffd666', 'danger': '#ff6b6b', 'info': '#74b9ff'}
 
 
 def apply_dark_theme(fig, height=350, **kwargs):
-    """Apply dark theme to a plotly figure."""
-    layout_args = {
-        'paper_bgcolor': 'rgba(0,0,0,0)',
-        'plot_bgcolor': 'rgba(0,0,0,0)',
-        'font': {'color': '#ccd6f6', 'family': 'Inter, sans-serif'},
-        'height': height,
-        'margin': kwargs.get('margin', dict(l=0, r=0, t=20, b=0)),
-        'xaxis': {
-            'gridcolor': 'rgba(255,255,255,0.1)',
-            'linecolor': 'rgba(255,255,255,0.1)',
-            'tickfont': {'color': '#8892b0'},
-            **kwargs.get('xaxis', {})
-        },
-        'yaxis': {
-            'gridcolor': 'rgba(255,255,255,0.1)',
-            'linecolor': 'rgba(255,255,255,0.1)',
-            'tickfont': {'color': '#8892b0'},
-            **kwargs.get('yaxis', {})
-        }
-    }
-    for k, v in kwargs.items():
-        if k not in ['xaxis', 'yaxis', 'margin']:
-            layout_args[k] = v
-    fig.update_layout(**layout_args)
-    return fig
+    return editorial_plotly(fig, height=height, **kwargs)
 
 
 @st.cache_resource

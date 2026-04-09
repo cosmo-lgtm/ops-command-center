@@ -9,85 +9,10 @@ from google.cloud import bigquery
 from datetime import datetime
 import plotly.graph_objects as go
 
-# Dark mode CSS
-st.markdown("""
-<style>
-    .metric-card {
-        background: linear-gradient(145deg, #1e1e2f 0%, #2a2a4a 100%);
-        border-radius: 16px;
-        padding: 24px;
-        border: 1px solid rgba(255,255,255,0.1);
-        box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-    }
+from nowadays_ui import editorial_plotly, inject_editorial_style
 
-    .metric-value {
-        font-size: 36px;
-        font-weight: 700;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin: 0;
-    }
+inject_editorial_style()
 
-    .metric-label {
-        font-size: 14px;
-        color: #8892b0;
-        text-transform: uppercase;
-        letter-spacing: 1.5px;
-        margin-top: 8px;
-    }
-
-    .dashboard-header {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-size: 42px;
-        font-weight: 800;
-        margin-bottom: 8px;
-    }
-
-    .dashboard-subtitle {
-        color: #8892b0;
-        font-size: 16px;
-        margin-bottom: 32px;
-    }
-
-    .section-header {
-        color: #ccd6f6;
-        font-size: 20px;
-        font-weight: 600;
-        margin: 24px 0 12px 0;
-        padding-bottom: 8px;
-        border-bottom: 2px solid rgba(102, 126, 234, 0.3);
-    }
-
-    .source-label {
-        color: #5a6a8a;
-        font-size: 11px;
-        font-style: italic;
-        margin-top: 4px;
-    }
-
-    .coming-soon {
-        background: linear-gradient(145deg, #1e1e2f 0%, #2a2a4a 100%);
-        border-radius: 16px;
-        padding: 60px 24px;
-        border: 1px solid rgba(255,255,255,0.1);
-        text-align: center;
-    }
-
-    .coming-soon-text {
-        color: #5a6a8a;
-        font-size: 18px;
-        font-weight: 500;
-    }
-
-    .coming-soon-icon {
-        font-size: 48px;
-        margin-bottom: 16px;
-    }
-</style>
-""", unsafe_allow_html=True)
 
 COLORS = {
     'primary': '#667eea',
@@ -101,31 +26,7 @@ COLORS = {
 
 
 def apply_dark_theme(fig, height=350, **kwargs):
-    """Apply dark theme to plotly figure."""
-    layout_args = {
-        'paper_bgcolor': 'rgba(0,0,0,0)',
-        'plot_bgcolor': 'rgba(0,0,0,0)',
-        'font': {'color': '#ccd6f6', 'family': 'Inter, sans-serif'},
-        'height': height,
-        'margin': kwargs.get('margin', dict(l=40, r=20, t=40, b=40)),
-        'xaxis': {
-            'gridcolor': 'rgba(255,255,255,0.05)',
-            'linecolor': 'rgba(255,255,255,0.1)',
-            'tickfont': {'color': '#8892b0'},
-            **kwargs.get('xaxis', {})
-        },
-        'yaxis': {
-            'gridcolor': 'rgba(255,255,255,0.05)',
-            'linecolor': 'rgba(255,255,255,0.1)',
-            'tickfont': {'color': '#8892b0'},
-            **kwargs.get('yaxis', {})
-        }
-    }
-    for k, v in kwargs.items():
-        if k not in ['xaxis', 'yaxis', 'margin']:
-            layout_args[k] = v
-    fig.update_layout(**layout_args)
-    return fig
+    return editorial_plotly(fig, height=height, **kwargs)
 
 
 @st.cache_resource

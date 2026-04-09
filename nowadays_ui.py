@@ -712,6 +712,223 @@ EDITORIAL_CSS = """
 .nw-source-link:hover { text-decoration: underline; }
 
 /* ----------------------------------------------------------------------
+   LEGACY COMPATIBILITY LAYER
+   These rules adopt the class names that legacy dark dashboards
+   already use (.metric-card, .metric-value, .metric-label, .kpi-*,
+   .dashboard-header, .dashboard-subtitle, .section-header, etc.) and
+   restyle them for the editorial look. This way each legacy page can
+   keep its existing st.markdown() blocks intact and just swap its
+   own <style> block for inject_editorial_style().
+   ---------------------------------------------------------------------- */
+
+/* Headings */
+.dashboard-header,
+.section-header h1,
+.section-header h2,
+[data-testid="stMain"] .dashboard-header {
+  font-family: 'Jost', 'Helvetica', sans-serif !important;
+  font-size: 3.5rem !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.035em !important;
+  color: var(--nw-char) !important;
+  background: none !important;
+  -webkit-background-clip: initial !important;
+  -webkit-text-fill-color: var(--nw-char) !important;
+  margin: 0 0 8px 0 !important;
+}
+.dashboard-subtitle {
+  color: var(--nw-on-surface-variant) !important;
+  font-size: 1rem !important;
+  margin-bottom: 32px !important;
+  font-weight: 500 !important;
+  font-family: 'Jost', 'Helvetica', sans-serif !important;
+}
+.section-header {
+  font-family: 'Jost', 'Helvetica', sans-serif !important;
+  font-size: 1.5rem !important;
+  font-weight: 700 !important;
+  color: var(--nw-char) !important;
+  margin: 36px 0 18px 0 !important;
+  padding-bottom: 10px !important;
+  border-bottom: 1px solid var(--nw-surface-variant) !important;
+  letter-spacing: -0.02em !important;
+  background: none !important;
+  -webkit-background-clip: initial !important;
+  -webkit-text-fill-color: var(--nw-char) !important;
+}
+
+/* Metric cards (white surfaces, soft shadow) */
+.metric-card,
+.kpi-card,
+.filter-container,
+.forecast-banner {
+  background: var(--nw-surface-lowest) !important;
+  border-radius: 24px !important;
+  padding: 28px 30px !important;
+  border: 1px solid rgba(45, 41, 38, 0.04) !important;
+  box-shadow: var(--nw-shadow) !important;
+  margin-bottom: 16px;
+}
+.forecast-banner {
+  border-left: 4px solid var(--nw-navy) !important;
+  border-radius: 16px !important;
+  padding: 20px 26px !important;
+}
+
+/* Metric values — large numeric display, navy by default, color
+   variants override for semantic meaning. Use solid colors instead
+   of the legacy webkit-clip gradients which won't read on cream. */
+.metric-value,
+.kpi-value {
+  font-family: 'Jost', 'Helvetica', sans-serif !important;
+  font-size: 2.6rem !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.025em !important;
+  line-height: 1.05 !important;
+  color: var(--nw-char) !important;
+  background: none !important;
+  -webkit-background-clip: initial !important;
+  -webkit-text-fill-color: var(--nw-char) !important;
+  margin: 0 !important;
+}
+.metric-value-blue,
+.metric-value-info,
+.metric-value-teal {
+  color: var(--nw-navy) !important;
+  -webkit-text-fill-color: var(--nw-navy) !important;
+}
+.metric-value-green,
+.metric-value-success {
+  color: var(--nw-forest) !important;
+  -webkit-text-fill-color: var(--nw-forest) !important;
+}
+.metric-value-gold,
+.metric-value-warning {
+  color: #8a6b00 !important;
+  -webkit-text-fill-color: #8a6b00 !important;
+}
+.metric-value-red,
+.metric-value-danger {
+  color: #b04d5e !important;
+  -webkit-text-fill-color: #b04d5e !important;
+}
+
+/* Metric labels — small uppercase eyebrows */
+.metric-label,
+.kpi-label,
+.metric-name,
+.kpi-metric-name {
+  font-family: 'Jost', 'Helvetica', sans-serif !important;
+  font-size: 0.7rem !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.14em !important;
+  color: var(--nw-outline) !important;
+  font-weight: 600 !important;
+  margin-top: 10px !important;
+  margin-bottom: 0 !important;
+}
+
+/* Secondary text inside cards */
+.metric-sub,
+.metric-sublabel,
+.metric-owner,
+.kpi-owner,
+.kpi-target,
+.kpi-pct {
+  font-family: 'Jost', 'Helvetica', sans-serif !important;
+  font-size: 0.85rem !important;
+  color: var(--nw-on-surface-variant) !important;
+  font-weight: 500 !important;
+  margin-top: 6px !important;
+}
+
+/* Delta / growth chips */
+.metric-delta-positive,
+.kpi-delta-positive {
+  display: inline-block;
+  background: var(--nw-green) !important;
+  color: var(--nw-forest) !important;
+  padding: 5px 12px !important;
+  border-radius: 999px !important;
+  font-weight: 700 !important;
+  font-size: 0.78rem !important;
+  font-family: 'Jost', 'Helvetica', sans-serif !important;
+  letter-spacing: 0.02em;
+}
+.metric-delta-negative,
+.kpi-delta-negative {
+  display: inline-block;
+  background: var(--nw-pink) !important;
+  color: var(--nw-char) !important;
+  padding: 5px 12px !important;
+  border-radius: 999px !important;
+  font-weight: 700 !important;
+  font-size: 0.78rem !important;
+  font-family: 'Jost', 'Helvetica', sans-serif !important;
+  letter-spacing: 0.02em;
+}
+
+/* "Live" pulse indicator */
+.live-indicator {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  color: var(--nw-forest) !important;
+  font-size: 0.7rem !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.14em !important;
+  font-weight: 600 !important;
+  font-family: 'Jost', 'Helvetica', sans-serif !important;
+}
+.live-dot {
+  width: 8px !important;
+  height: 8px !important;
+  background: var(--nw-green) !important;
+  border-radius: 50% !important;
+  box-shadow: 0 0 0 4px rgba(133, 199, 157, 0.25) !important;
+  animation: nwPulse 2s infinite !important;
+}
+@keyframes nwPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.15); }
+}
+
+/* Streamlit native metric widget */
+[data-testid="stMetric"] {
+  background: var(--nw-surface-lowest) !important;
+  border-radius: 24px !important;
+  padding: 24px 28px !important;
+  border: 1px solid rgba(45, 41, 38, 0.04) !important;
+  box-shadow: var(--nw-shadow) !important;
+}
+[data-testid="stMetricLabel"] {
+  font-family: 'Jost', sans-serif !important;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.7rem !important;
+  color: var(--nw-outline) !important;
+  font-weight: 600 !important;
+}
+[data-testid="stMetricValue"] {
+  font-family: 'Jost', sans-serif !important;
+  color: var(--nw-char) !important;
+  font-size: 2.4rem !important;
+  font-weight: 700 !important;
+}
+[data-testid="stMetricDelta"] {
+  font-family: 'Jost', sans-serif !important;
+  font-weight: 600 !important;
+}
+
+/* Streamlit dataframe / table — clean editorial */
+[data-testid="stDataFrame"],
+[data-testid="stTable"] {
+  border-radius: 16px !important;
+  overflow: hidden;
+  box-shadow: var(--nw-shadow);
+}
+
+/* ----------------------------------------------------------------------
    FOOTER
    ---------------------------------------------------------------------- */
 
@@ -994,3 +1211,93 @@ def render_row(
 def render_empty_row(message: str = "No data yet — check back after the next refresh.") -> str:
     """Return HTML for an empty-state placeholder row."""
     return f"<div class='nw-empty-row'>{message}</div>"
+
+
+# ---------------------------------------------------------------------------
+# Plotly editorial theme
+# ---------------------------------------------------------------------------
+
+# Nowadays brand-aligned plotly trace colors. Used as the default colorway
+# so any chart automatically picks brand colors instead of plotly defaults.
+EDITORIAL_PLOTLY_COLORS = [
+    "#074A7A",  # navy
+    "#85C79D",  # green
+    "#F4C864",  # yellow
+    "#FE99A9",  # pink
+    "#8EDDED",  # sky
+    "#3F634E",  # forest
+    "#E7B78A",  # cream
+    "#2D2926",  # charcoal
+]
+
+
+def editorial_plotly(fig, height: int = 350, **kwargs):
+    """Apply the Nowadays editorial light theme to a plotly figure.
+
+    Drop-in replacement for the legacy `apply_dark_theme(fig)` helper
+    used by the dark dashboards. Returns the same fig (mutated) so it
+    can be chained: `st.plotly_chart(editorial_plotly(fig), ...)`.
+
+    Sets:
+      - Transparent paper / plot backgrounds (so the editorial cream
+        canvas shows through)
+      - Charcoal text in Jost
+      - Subtle warm-grey gridlines
+      - Nowadays brand colorway
+      - Reasonable margins for in-card embedding
+
+    Pass-through kwargs are forwarded to fig.update_layout() so callers
+    can override (e.g. `editorial_plotly(fig, showlegend=False)`).
+    """
+    xaxis_defaults = {
+        "gridcolor": "rgba(45, 41, 38, 0.08)",
+        "linecolor": "rgba(45, 41, 38, 0.12)",
+        "tickfont": {"color": "#625f56", "family": "Jost, Helvetica, sans-serif"},
+        "title_font": {"color": "#2D2926", "family": "Jost, Helvetica, sans-serif"},
+    }
+    yaxis_defaults = {
+        "gridcolor": "rgba(45, 41, 38, 0.08)",
+        "linecolor": "rgba(45, 41, 38, 0.12)",
+        "tickfont": {"color": "#625f56", "family": "Jost, Helvetica, sans-serif"},
+        "title_font": {"color": "#2D2926", "family": "Jost, Helvetica, sans-serif"},
+    }
+    xaxis_defaults.update(kwargs.pop("xaxis", {}))
+    yaxis_defaults.update(kwargs.pop("yaxis", {}))
+    margin = kwargs.pop("margin", dict(l=8, r=8, t=24, b=8))
+
+    # Merge instead of clobber for legend / font / colorway so caller
+    # overrides take precedence without raising "multiple values for
+    # keyword argument" TypeErrors.
+    legend_defaults = {
+        "font": {"color": "#2D2926", "family": "Jost, Helvetica, sans-serif"},
+    }
+    caller_legend = kwargs.pop("legend", None)
+    if isinstance(caller_legend, dict):
+        legend_defaults.update(caller_legend)
+    elif caller_legend is not None:
+        legend_defaults = caller_legend  # caller passed something non-dict; respect it
+
+    font_defaults = {"color": "#2D2926", "family": "Jost, Helvetica, sans-serif"}
+    caller_font = kwargs.pop("font", None)
+    if isinstance(caller_font, dict):
+        font_defaults.update(caller_font)
+
+    colorway = kwargs.pop("colorway", EDITORIAL_PLOTLY_COLORS)
+
+    # Drop conflicting kwargs we already set explicitly
+    for key in ("paper_bgcolor", "plot_bgcolor", "height"):
+        kwargs.pop(key, None)
+
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=font_defaults,
+        height=height,
+        margin=margin,
+        xaxis=xaxis_defaults,
+        yaxis=yaxis_defaults,
+        colorway=colorway,
+        legend=legend_defaults,
+        **kwargs,
+    )
+    return fig

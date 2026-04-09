@@ -12,127 +12,10 @@ import plotly.graph_objects as go
 import plotly.express as px
 import numpy as np
 
-# Dark mode CSS
-st.markdown("""
-<style>
-    /* Force wide layout */
-    .block-container {
-        max-width: 100% !important;
-        padding-left: 2rem !important;
-        padding-right: 2rem !important;
-    }
+from nowadays_ui import editorial_plotly, inject_editorial_style
 
-    .metric-card {
-        background: linear-gradient(145deg, #1e1e2f 0%, #2a2a4a 100%);
-        border-radius: 16px;
-        padding: 24px;
-        border: 1px solid rgba(255,255,255,0.1);
-        box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-    }
+inject_editorial_style()
 
-    .metric-value {
-        font-size: 36px;
-        font-weight: 700;
-        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin: 0;
-    }
-
-    .metric-value-teal {
-        font-size: 36px;
-        font-weight: 700;
-        background: linear-gradient(135deg, #00d4aa 0%, #00a3cc 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin: 0;
-    }
-
-    .metric-value-gold {
-        font-size: 36px;
-        font-weight: 700;
-        background: linear-gradient(135deg, #ffd666 0%, #ff9f43 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin: 0;
-    }
-
-    .metric-value-blue {
-        font-size: 36px;
-        font-weight: 700;
-        background: linear-gradient(135deg, #74b9ff 0%, #667eea 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin: 0;
-    }
-
-    .metric-label {
-        font-size: 14px;
-        color: #8892b0;
-        text-transform: uppercase;
-        letter-spacing: 1.5px;
-        margin-top: 8px;
-    }
-
-    .metric-sub {
-        font-size: 12px;
-        color: #5a6a8a;
-        margin-top: 4px;
-    }
-
-    .dashboard-header {
-        background: linear-gradient(90deg, #f093fb 0%, #f5576c 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-size: 42px;
-        font-weight: 800;
-        margin-bottom: 8px;
-    }
-
-    .dashboard-subtitle {
-        color: #8892b0;
-        font-size: 16px;
-        margin-bottom: 32px;
-    }
-
-    .section-header {
-        color: #ccd6f6;
-        font-size: 20px;
-        font-weight: 600;
-        margin: 24px 0 12px 0;
-        padding-bottom: 8px;
-        border-bottom: 2px solid rgba(240, 147, 251, 0.3);
-    }
-
-    .insight-banner {
-        background: linear-gradient(145deg, #1e3a5f 0%, #2a4a6a 100%);
-        border-radius: 12px;
-        padding: 16px 24px;
-        border-left: 4px solid #f093fb;
-        margin: 16px 0;
-        color: #ccd6f6;
-    }
-
-    /* Style the radio buttons to look like a segmented control */
-    div[data-testid="stRadio"] > div {
-        flex-direction: row;
-        gap: 0;
-    }
-    div[data-testid="stRadio"] > div > label {
-        padding: 6px 20px;
-        border: 1px solid rgba(255,255,255,0.15);
-        background: rgba(30,30,47,0.8);
-        color: #8892b0;
-        cursor: pointer;
-    }
-    div[data-testid="stRadio"] > div > label:first-child {
-        border-radius: 8px 0 0 8px;
-    }
-    div[data-testid="stRadio"] > div > label:last-child {
-        border-radius: 0 8px 8px 0;
-    }
-</style>
-""", unsafe_allow_html=True)
 
 COLORS = {
     'primary': '#f093fb',
@@ -147,30 +30,7 @@ COLORS = {
 
 
 def apply_dark_theme(fig, height=350, **kwargs):
-    layout_args = {
-        'paper_bgcolor': 'rgba(0,0,0,0)',
-        'plot_bgcolor': 'rgba(0,0,0,0)',
-        'font': {'color': '#ccd6f6', 'family': 'Inter, sans-serif'},
-        'height': height,
-        'margin': kwargs.get('margin', dict(l=40, r=20, t=40, b=40)),
-        'xaxis': {
-            'gridcolor': 'rgba(255,255,255,0.05)',
-            'linecolor': 'rgba(255,255,255,0.1)',
-            'tickfont': {'color': '#8892b0'},
-            **kwargs.get('xaxis', {})
-        },
-        'yaxis': {
-            'gridcolor': 'rgba(255,255,255,0.05)',
-            'linecolor': 'rgba(255,255,255,0.1)',
-            'tickfont': {'color': '#8892b0'},
-            **kwargs.get('yaxis', {})
-        }
-    }
-    for k, v in kwargs.items():
-        if k not in ['xaxis', 'yaxis', 'margin']:
-            layout_args[k] = v
-    fig.update_layout(**layout_args)
-    return fig
+    return editorial_plotly(fig, height=height, **kwargs)
 
 
 @st.cache_resource
@@ -590,7 +450,7 @@ def main():
     # --- Platform Filter ---
     platform = st.radio(
         "Platform",
-        ["All", "WooCommerce", "Shopify"],
+        ["Shopify", "All", "WooCommerce"],
         horizontal=True,
         label_visibility="collapsed",
     )

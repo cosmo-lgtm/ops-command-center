@@ -13,6 +13,8 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import numpy as np
 
+from nowadays_ui import editorial_plotly, inject_editorial_style
+
 # Page config
 st.set_page_config(
     page_title="Sales Dashboard",
@@ -20,58 +22,10 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+inject_editorial_style()
 
 # Dark mode CSS (matching ops-command-center theme)
-st.markdown("""
-<style>
-    .block-container {
-        max-width: 100% !important;
-        padding-left: 2rem !important;
-        padding-right: 2rem !important;
-    }
-    .stApp {
-        background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%);
-    }
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden; height: 0px !important;}
-    .stApp > header {display: none !important;}
-    .stDeployButton {display: none !important;}
-    [data-testid="stHeader"] {display: none !important;}
-    [data-testid="stToolbar"] {display: none !important;}
-    .block-container {padding-top: 1rem !important;}
 
-    /* KPI Cards */
-    .kpi-card {
-        background: linear-gradient(145deg, #1e1e2f 0%, #2a2a4a 100%);
-        border-radius: 12px;
-        padding: 20px;
-        border: 1px solid rgba(255,255,255,0.1);
-        text-align: center;
-    }
-    .kpi-value {
-        font-size: 32px;
-        font-weight: 700;
-        color: #00d4aa;
-        margin: 0;
-    }
-    .kpi-label {
-        font-size: 12px;
-        color: #8892b0;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin-top: 4px;
-    }
-    .kpi-delta-positive {
-        color: #64ffda;
-        font-size: 12px;
-    }
-    .kpi-delta-negative {
-        color: #ff6b6b;
-        font-size: 12px;
-    }
-</style>
-""", unsafe_allow_html=True)
 
 COLORS = {
     'b2b': '#2E86AB',      # Blue for B2B
@@ -709,18 +663,7 @@ def render_kpi(value, label, delta=None):
 
 
 def apply_dark_theme(fig, height=350):
-    """Apply dark theme to plotly figure."""
-    fig.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='#ccd6f6'),
-        height=height,
-        margin=dict(l=20, r=20, t=40, b=20),
-        xaxis=dict(gridcolor='rgba(255,255,255,0.1)', linecolor='rgba(255,255,255,0.1)'),
-        yaxis=dict(gridcolor='rgba(255,255,255,0.1)', linecolor='rgba(255,255,255,0.1)'),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, font=dict(color='#8892b0'))
-    )
-    return fig
+    return editorial_plotly(fig, height=height)
 
 
 # ============================================================================

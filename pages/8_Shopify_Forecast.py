@@ -12,84 +12,26 @@ import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
 
+from nowadays_ui import editorial_plotly, inject_editorial_style
+
 st.set_page_config(page_title="Shopify Forecast", page_icon="🛒", layout="wide")
+inject_editorial_style()
 
-# Dark mode CSS
-st.markdown("""
-<style>
-    .stApp { background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%); }
-    #MainMenu, footer, header { visibility: hidden; }
-    .metric-card {
-        background: linear-gradient(145deg, #1e1e2f 0%, #2a2a4a 100%);
-        border-radius: 16px; padding: 24px;
-        border: 1px solid rgba(255,255,255,0.1);
-        box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-    }
-    .metric-value {
-        font-size: 42px; font-weight: 700;
-        background: linear-gradient(135deg, #00d4aa 0%, #00a3cc 100%);
-        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    }
-    .metric-value-warning {
-        font-size: 42px; font-weight: 700;
-        background: linear-gradient(135deg, #ffd666 0%, #ff9f43 100%);
-        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    }
-    .metric-value-success {
-        font-size: 42px; font-weight: 700;
-        background: linear-gradient(135deg, #64ffda 0%, #00d4aa 100%);
-        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    }
-    .metric-value-info {
-        font-size: 42px; font-weight: 700;
-        background: linear-gradient(135deg, #74b9ff 0%, #667eea 100%);
-        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    }
-    .metric-label { font-size: 14px; color: #8892b0; text-transform: uppercase; letter-spacing: 1.5px; margin-top: 8px; }
-    .dashboard-header {
-        background: linear-gradient(90deg, #00d4aa 0%, #00a3cc 100%);
-        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        font-size: 48px; font-weight: 800;
-    }
-    .dashboard-subtitle { color: #8892b0; font-size: 16px; margin-bottom: 32px; }
-    .section-header {
-        color: #ccd6f6; font-size: 24px; font-weight: 600;
-        margin: 32px 0 16px 0; padding-bottom: 8px;
-        border-bottom: 2px solid rgba(0, 212, 170, 0.3);
-    }
-    .filter-container {
-        background: linear-gradient(145deg, #1e1e2f 0%, #2a2a4a 100%);
-        border-radius: 16px; padding: 20px; margin-bottom: 24px;
-        border: 1px solid rgba(255,255,255,0.1);
-    }
-    .forecast-banner {
-        background: linear-gradient(145deg, #1e3a5f 0%, #2a4a6a 100%);
-        border-radius: 12px; padding: 16px 24px;
-        border-left: 4px solid #00d4aa; margin: 16px 0;
-    }
-    .live-indicator { display: inline-flex; align-items: center; gap: 8px; color: #64ffda; font-size: 12px; text-transform: uppercase; }
-    .live-dot { width: 8px; height: 8px; background: #64ffda; border-radius: 50%; animation: pulse 2s infinite; }
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-</style>
-""", unsafe_allow_html=True)
-
+# Brand-aligned color palette (overrides legacy neon teal/cyan)
 COLORS = {
-    'primary': '#00d4aa', 'secondary': '#00a3cc', 'success': '#64ffda',
-    'warning': '#ffd666', 'danger': '#ff6b6b', 'info': '#74b9ff', 'purple': '#667eea'
+    'primary': '#074A7A',   # navy
+    'secondary': '#8EDDED', # sky
+    'success': '#85C79D',   # green
+    'warning': '#F4C864',   # yellow
+    'danger': '#FE99A9',    # pink
+    'info': '#074A7A',      # navy
+    'purple': '#3F634E',    # forest
 }
 
+# Backwards-compat alias — every chart in this page calls
+# `apply_dark_theme(fig)`. Delegates to the editorial light theme.
 def apply_dark_theme(fig, height=350, **kwargs):
-    xaxis_defaults = {'gridcolor': 'rgba(255,255,255,0.1)', 'tickfont': {'color': '#8892b0'}}
-    yaxis_defaults = {'gridcolor': 'rgba(255,255,255,0.1)', 'tickfont': {'color': '#8892b0'}}
-    xaxis_defaults.update(kwargs.pop('xaxis', {}))
-    yaxis_defaults.update(kwargs.pop('yaxis', {}))
-    margin = kwargs.pop('margin', dict(l=0, r=0, t=20, b=0))
-    fig.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        font={'color': '#ccd6f6'}, height=height, margin=margin,
-        xaxis=xaxis_defaults, yaxis=yaxis_defaults, **kwargs
-    )
-    return fig
+    return editorial_plotly(fig, height=height, **kwargs)
 
 @st.cache_resource
 def get_bq_client():

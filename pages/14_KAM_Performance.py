@@ -12,6 +12,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
 
+from nowadays_ui import editorial_plotly, inject_editorial_style
+
 # Page config
 st.set_page_config(
     page_title="KAM Performance",
@@ -19,131 +21,10 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+inject_editorial_style()
 
 # Dark mode CSS
-st.markdown("""
-<style>
-    .stApp {
-        background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%);
-    }
-    .block-container {
-        max-width: 100% !important;
-        padding-left: 2rem !important;
-        padding-right: 2rem !important;
-    }
-    [data-testid="stHorizontalBlock"] {
-        flex-wrap: nowrap !important;
-        gap: 1rem;
-    }
-    [data-testid="stColumn"] {
-        min-width: 0 !important;
-        flex: 1 1 0 !important;
-    }
 
-    .metric-card {
-        background: linear-gradient(145deg, #1e1e2f 0%, #2a2a4a 100%);
-        border-radius: 16px;
-        padding: 24px;
-        border: 1px solid rgba(255,255,255,0.1);
-        box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
-        margin-bottom: 16px;
-    }
-    .metric-card:hover {
-        transform: translateY(-4px);
-        box-shadow: 0 12px 40px rgba(0,0,0,0.4);
-    }
-    .metric-value {
-        font-size: 36px;
-        font-weight: 700;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin: 0;
-    }
-    .metric-value-green {
-        font-size: 36px;
-        font-weight: 700;
-        background: linear-gradient(135deg, #64ffda 0%, #00bfa5 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin: 0;
-    }
-    .metric-value-gold {
-        font-size: 36px;
-        font-weight: 700;
-        background: linear-gradient(135deg, #ffd700 0%, #ff8c00 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin: 0;
-    }
-    .metric-value-red {
-        font-size: 36px;
-        font-weight: 700;
-        background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin: 0;
-    }
-    .metric-label {
-        font-size: 14px;
-        color: #8892b0;
-        text-transform: uppercase;
-        letter-spacing: 1.5px;
-        margin-top: 8px;
-    }
-    .metric-sublabel {
-        font-size: 12px;
-        color: #5a6785;
-        margin-top: 4px;
-    }
-    .dashboard-header {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-size: 42px;
-        font-weight: 800;
-        margin-bottom: 8px;
-    }
-    .dashboard-subtitle {
-        color: #8892b0;
-        font-size: 16px;
-        margin-bottom: 32px;
-    }
-    .section-header {
-        color: #ccd6f6;
-        font-size: 22px;
-        font-weight: 600;
-        margin: 28px 0 16px 0;
-        padding-bottom: 8px;
-        border-bottom: 2px solid rgba(102, 126, 234, 0.3);
-    }
-    .status-healthy {
-        background: linear-gradient(135deg, #64ffda 0%, #00bfa5 100%);
-        color: #0f0f1a; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700;
-    }
-    .status-warning {
-        background: linear-gradient(135deg, #ffd700 0%, #ff8c00 100%);
-        color: #0f0f1a; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700;
-    }
-    .status-critical {
-        background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
-        color: #0f0f1a; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700;
-    }
-    [data-testid="stDataFrame"] {
-        background: rgba(30, 30, 47, 0.6);
-        border-radius: 12px;
-        border: 1px solid rgba(255,255,255,0.08);
-    }
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] {
-        background: rgba(30, 30, 47, 0.6); border-radius: 8px; color: #8892b0; padding: 8px 16px;
-    }
-    .stTabs [aria-selected="true"] {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;
-    }
-</style>
-""", unsafe_allow_html=True)
 
 
 # ── BQ Connection ──────────────────────────────────────────────
@@ -236,14 +117,7 @@ def render_metric(label, value, sublabel="", color="purple"):
 
 
 def apply_dark_theme(fig):
-    fig.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        font_color='#ccd6f6', title_font_color='#ccd6f6', legend_font_color='#8892b0',
-        margin=dict(l=20, r=20, t=40, b=20),
-    )
-    fig.update_xaxes(gridcolor='rgba(255,255,255,0.05)', zerolinecolor='rgba(255,255,255,0.1)')
-    fig.update_yaxes(gridcolor='rgba(255,255,255,0.05)', zerolinecolor='rgba(255,255,255,0.1)')
-    return fig
+    return editorial_plotly(fig)
 
 
 def get_volume_col(period):

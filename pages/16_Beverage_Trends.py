@@ -617,7 +617,7 @@ def main() -> None:
     col1, col2 = st.columns(2, gap="large")
     with col1:
         render_card(
-            title="Trending Flavors",
+            title="Trending Ingredients",
             material_icon="trending_up",
             icon_color="green",
             eyebrow="Global Data",
