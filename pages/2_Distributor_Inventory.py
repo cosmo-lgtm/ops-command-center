@@ -474,6 +474,44 @@ def load_trend_data(lookback_weeks: int = 12):
 
 
 @st.cache_data(ttl=300)
+def load_trend_by_family(lookback_weeks: int = 12):
+    """Load weekly depletion trends broken out by product family (Cans, Bottles, Shots)."""
+    client = get_bq_client()
+
+    query = f"""
+    WITH vip_item_units AS (
+        SELECT SupplierItem as item_code,
+            SAFE_CAST(Units AS INT64) as units_per_case,
+            CASE
+                WHEN `Desc` LIKE '%Seltzer%' OR `Desc` LIKE '%oz' AND SAFE_CAST(Units AS INT64) = 24 THEN 'Cans'
+                WHEN `Desc` LIKE '%750%' OR `Desc` LIKE '%ml' THEN 'Bottles'
+                WHEN `Desc` LIKE '%Shot%' OR `Desc` LIKE '%2 oz%' THEN 'Shots'
+                ELSE 'Other'
+            END as product_family
+        FROM `artful-logic-475116-p1.raw_vip.items`
+        WHERE SupplierItem IS NOT NULL
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY SupplierItem ORDER BY _airbyte_extracted_at DESC) = 1
+    )
+    SELECT
+        DATE_TRUNC(SAFE.PARSE_DATE('%Y%m%d', sl.Invoice_Date), WEEK) as week_start,
+        COALESCE(iu.product_family, 'Other') as product_family,
+        SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64) * COALESCE(iu.units_per_case, 6)
+                 WHEN sl.UOM = 'B' THEN SAFE_CAST(sl.Qty AS INT64)
+                 ELSE SAFE_CAST(sl.Qty AS INT64) * COALESCE(iu.units_per_case, 6) END) as qty_depleted,
+        COUNT(DISTINCT sl.Acct_Code) as stores_reached
+    FROM `artful-logic-475116-p1.raw_vip.sales_lite` sl
+    LEFT JOIN vip_item_units iu ON sl.Item_Code = iu.item_code
+    WHERE SAFE.PARSE_DATE('%Y%m%d', sl.Invoice_Date) >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_weeks} WEEK)
+        AND SAFE_CAST(sl.Qty AS INT64) > 0
+        AND sl.Item_Code NOT LIKE '99Z%'
+        AND sl.Item_Code != 'XXXXXX'
+    GROUP BY week_start, product_family
+    ORDER BY week_start, product_family
+    """
+    return client.query(query).to_dataframe()
+
+
+@st.cache_data(ttl=300)
 def load_distributor_weekly_trends(lookback_weeks: int = 12):
     """Load weekly depletion trends per distributor for granular forecasting."""
     client = get_bq_client()
@@ -912,11 +950,9 @@ def main():
     try:
         distributors_df = load_distributors()
         inventory_df = load_inventory_data(lookback_days=lookback_days)
-        # Trend data: convert days to weeks, minimum 12 for forecasting (loaded separately)
         lookback_weeks = lookback_days // 7
         trend_df = load_trend_data(lookback_weeks=lookback_weeks)
-        # Always load 12 weeks for forecast model regardless of display lookback
-        forecast_trend_df = load_trend_data(lookback_weeks=12) if lookback_weeks < 12 else trend_df
+        family_trend_df = load_trend_by_family(lookback_weeks=lookback_weeks)
         # Load distributor-level trends for stockout analysis
         dist_trends_df = load_distributor_weekly_trends(lookback_weeks=12)
     except Exception as e:
@@ -963,8 +999,8 @@ def main():
 
     avg_weeks = has_depletion_df[has_depletion_df['weeks_of_inventory'].notna() & (has_depletion_df['weeks_of_inventory'] > 0)]['weeks_of_inventory'].mean()
 
-    # KPI Cards Row
-    col1, col2, col3, col4, col5 = st.columns(5)
+    # KPI Cards Row 1: Volume & Value
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         st.markdown(render_metric_card(
@@ -979,7 +1015,21 @@ def main():
         ), unsafe_allow_html=True)
 
     with col3:
-        # Percentage based on distributors WITH depletion data (those we can classify)
+        st.markdown(render_metric_card(
+            f"{total_qty_ordered:,.0f}",
+            f"Units Ordered ({lookback_days}d)"
+        ), unsafe_allow_html=True)
+
+    with col4:
+        st.markdown(render_metric_card(
+            f"{total_qty_depleted:,.0f}",
+            f"Units Depleted ({lookback_days}d)"
+        ), unsafe_allow_html=True)
+
+    # KPI Cards Row 2: Inventory Health
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
         has_depletion_total = len(has_depletion_df)
         overstock_pct = round(100 * overstock_count / max(has_depletion_total, 1), 1)
         st.markdown(render_metric_card(
@@ -988,7 +1038,7 @@ def main():
             card_type="warning"
         ), unsafe_allow_html=True)
 
-    with col4:
+    with col2:
         understock_pct = round(100 * understock_count / max(has_depletion_total, 1), 1)
         st.markdown(render_metric_card(
             f"{understock_count} ({understock_pct}%)",
@@ -996,11 +1046,20 @@ def main():
             card_type="danger"
         ), unsafe_allow_html=True)
 
-    with col5:
+    with col3:
         avg_weeks_display = f"{avg_weeks:.1f}" if pd.notna(avg_weeks) else "N/A"
         st.markdown(render_metric_card(
             avg_weeks_display,
             "Avg Weeks Inventory"
+        ), unsafe_allow_html=True)
+
+    with col4:
+        od_ratio = round(total_qty_ordered / total_qty_depleted, 2) if total_qty_depleted > 0 else 0
+        od_type = "primary" if 0.8 <= od_ratio <= 1.3 else ("warning" if od_ratio > 1.3 else "danger")
+        st.markdown(render_metric_card(
+            f"{od_ratio:.2f}",
+            "Order/Depletion Ratio",
+            card_type=od_type
         ), unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -1138,223 +1197,47 @@ def main():
         )
         st.plotly_chart(fig, use_container_width=True)
 
-    # Forecast Section: 3-Month Orders & Depletion Forecast with Cone of Certainty
-    st.markdown('<p class="section-header">📈 3-Month Forecast</p>', unsafe_allow_html=True)
-    st.markdown('<p style="color: #625f56; font-size: 14px; margin-top: -10px;">Ensemble forecast using Linear Regression, Exponential Smoothing, and Moving Average with Trend</p>', unsafe_allow_html=True)
+    # Volume by Product Family (Cans, Bottles, Shots)
+    st.markdown('<p class="section-header">Depletion by Product Family</p>', unsafe_allow_html=True)
 
-    if not forecast_trend_df.empty:
-        forecast_result = generate_ensemble_forecast(forecast_trend_df, forecast_weeks=12)
+    if not family_trend_df.empty:
+        family_colors = {'Cans': COLORS['primary'], 'Bottles': COLORS['secondary'],
+                         'Shots': COLORS['info'], 'Other': '#8892b0'}
 
-        if forecast_result is not None:
-            forecast_df, historical_df = forecast_result
+        # Stacked area chart
+        fam_col1, fam_col2 = st.columns([2, 1])
 
-            # Two side-by-side charts: Orders forecast and Depletion forecast
-            fchart1, fchart2 = st.columns(2)
+        with fam_col1:
+            fig_fam = go.Figure()
+            for family in ['Cans', 'Bottles', 'Shots', 'Other']:
+                fam_data = family_trend_df[family_trend_df['product_family'] == family].sort_values('week_start')
+                if not fam_data.empty:
+                    fig_fam.add_trace(go.Scatter(
+                        x=fam_data['week_start'],
+                        y=fam_data['qty_depleted'],
+                        mode='lines',
+                        name=family,
+                        stackgroup='one',
+                        line=dict(width=0.5, color=family_colors.get(family, '#8892b0')),
+                        hovertemplate=f'{family}: %{{y:,.0f}} units<extra></extra>'
+                    ))
+            apply_dark_theme(fig_fam, height=300,
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#2D2926')),
+                hovermode='x unified',
+                yaxis=dict(title=dict(text='Units Depleted'), tickformat=',.0f')
+            )
+            st.plotly_chart(fig_fam, use_container_width=True)
 
-            with fchart1:
-                st.markdown('<p style="color: #2D2926; font-size: 16px; font-weight: 600;">Orders Forecast</p>', unsafe_allow_html=True)
-                fig_orders = go.Figure()
-
-                # Historical orders line (in $K for readability)
-                hist_orders = historical_df['order_value'] / 1000
-                fig_orders.add_trace(go.Scatter(
-                    x=historical_df['week_start'],
-                    y=hist_orders,
-                    mode='lines+markers',
-                    name='Historical Orders',
-                    line=dict(color=COLORS['primary'], width=3),
-                    marker=dict(size=6),
-                    hovertemplate='$%{y:,.0f}K<extra></extra>'
-                ))
-
-                # 4-week moving average (dotted line) - Orders
-                orders_ma = hist_orders.rolling(window=4, min_periods=2).mean()
-                fig_orders.add_trace(go.Scatter(
-                    x=historical_df['week_start'],
-                    y=orders_ma,
-                    mode='lines',
-                    name='4-wk MA',
-                    line=dict(color=COLORS['primary'], width=2, dash='dot'),
-                    hovertemplate='$%{y:,.0f}K<extra></extra>'
-                ))
-
-                # 95% Confidence interval (outer cone) - Orders (in $K)
-                fig_orders.add_trace(go.Scatter(
-                    x=pd.concat([forecast_df['week_start'], forecast_df['week_start'][::-1]]),
-                    y=pd.concat([forecast_df['orders_ci_95_upper'] / 1000, forecast_df['orders_ci_95_lower'][::-1] / 1000]),
-                    fill='toself',
-                    fillcolor='rgba(102, 126, 234, 0.15)',
-                    line=dict(color='rgba(0,0,0,0)'),
-                    name='95% CI',
-                    showlegend=True,
-                    hoverinfo='skip'
-                ))
-
-                # 80% Confidence interval (inner cone) - Orders (in $K)
-                fig_orders.add_trace(go.Scatter(
-                    x=pd.concat([forecast_df['week_start'], forecast_df['week_start'][::-1]]),
-                    y=pd.concat([forecast_df['orders_ci_80_upper'] / 1000, forecast_df['orders_ci_80_lower'][::-1] / 1000]),
-                    fill='toself',
-                    fillcolor='rgba(102, 126, 234, 0.3)',
-                    line=dict(color='rgba(0,0,0,0)'),
-                    name='80% CI',
-                    showlegend=True,
-                    hoverinfo='skip'
-                ))
-
-                # Ensemble forecast line - Orders (in $K)
-                fig_orders.add_trace(go.Scatter(
-                    x=forecast_df['week_start'],
-                    y=forecast_df['orders_ensemble'] / 1000,
-                    mode='lines+markers',
-                    name='Forecast',
-                    line=dict(color=COLORS['primary'], width=3),
-                    marker=dict(size=6, symbol='diamond'),
-                    hovertemplate='$%{y:,.0f}K<extra></extra>'
-                ))
-
-                # Vertical line for forecast start
-                last_hist_str = str(historical_df['week_start'].max())[:10]
-                fig_orders.add_vline(
-                    x=last_hist_str,
-                    line_dash="dash",
-                    line_color="#8892b0"
-                )
-
-                apply_dark_theme(fig_orders, height=300,
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#2D2926', size=9)),
-                    hovermode='x unified'
-                )
-                fig_orders.update_layout(
-                    yaxis_title="Order Value ($K)",
-                    yaxis=dict(tickformat='$,.0f')
-                )
-                st.plotly_chart(fig_orders, use_container_width=True)
-
-            with fchart2:
-                st.markdown('<p style="color: #2D2926; font-size: 16px; font-weight: 600;">Depletion Forecast</p>', unsafe_allow_html=True)
-                fig_depl = go.Figure()
-
-                # Historical depletion line
-                hist_depletion = historical_df['qty_depleted']
-                fig_depl.add_trace(go.Scatter(
-                    x=historical_df['week_start'],
-                    y=hist_depletion,
-                    mode='lines+markers',
-                    name='Historical Depletion',
-                    line=dict(color=COLORS['secondary'], width=3),
-                    marker=dict(size=6)
-                ))
-
-                # 4-week moving average (dotted line) - Depletion
-                depletion_ma = hist_depletion.rolling(window=4, min_periods=2).mean()
-                fig_depl.add_trace(go.Scatter(
-                    x=historical_df['week_start'],
-                    y=depletion_ma,
-                    mode='lines',
-                    name='4-wk MA',
-                    line=dict(color=COLORS['secondary'], width=2, dash='dot')
-                ))
-
-                # 95% Confidence interval (outer cone) - Depletion
-                fig_depl.add_trace(go.Scatter(
-                    x=pd.concat([forecast_df['week_start'], forecast_df['week_start'][::-1]]),
-                    y=pd.concat([forecast_df['depletion_ci_95_upper'], forecast_df['depletion_ci_95_lower'][::-1]]),
-                    fill='toself',
-                    fillcolor='rgba(0, 212, 170, 0.15)',
-                    line=dict(color='rgba(0,0,0,0)'),
-                    name='95% CI',
-                    showlegend=True,
-                    hoverinfo='skip'
-                ))
-
-                # 80% Confidence interval (inner cone) - Depletion
-                fig_depl.add_trace(go.Scatter(
-                    x=pd.concat([forecast_df['week_start'], forecast_df['week_start'][::-1]]),
-                    y=pd.concat([forecast_df['depletion_ci_80_upper'], forecast_df['depletion_ci_80_lower'][::-1]]),
-                    fill='toself',
-                    fillcolor='rgba(0, 212, 170, 0.3)',
-                    line=dict(color='rgba(0,0,0,0)'),
-                    name='80% CI',
-                    showlegend=True,
-                    hoverinfo='skip'
-                ))
-
-                # Ensemble forecast line - Depletion
-                fig_depl.add_trace(go.Scatter(
-                    x=forecast_df['week_start'],
-                    y=forecast_df['depletion_ensemble'],
-                    mode='lines+markers',
-                    name='Forecast',
-                    line=dict(color=COLORS['secondary'], width=3),
-                    marker=dict(size=6, symbol='diamond')
-                ))
-
-                # Vertical line for forecast start
-                fig_depl.add_vline(
-                    x=last_hist_str,
-                    line_dash="dash",
-                    line_color="#8892b0"
-                )
-
-                apply_dark_theme(fig_depl, height=300,
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#2D2926', size=9)),
-                    hovermode='x unified'
-                )
-                fig_depl.update_layout(yaxis_title="Units Depleted")
-                st.plotly_chart(fig_depl, use_container_width=True)
-
-            # Forecast summary metrics - side by side: Orders (left) | Depletion (right)
-            mcol1, mcol2 = st.columns(2)
-
-            with mcol1:
-                st.markdown('<p style="color: #2D2926; font-size: 14px; margin-top: 10px;">📦 <b>Orders Forecast</b></p>', unsafe_allow_html=True)
-                ocol1, ocol2 = st.columns(2)
-                with ocol1:
-                    o_first = forecast_df.head(6)['orders_ensemble'].mean()
-                    o_second = forecast_df.tail(6)['orders_ensemble'].mean()
-                    o_trend = ((o_second - o_first) / o_first * 100) if o_first > 0 else 0
-                    o_label = "Trending Up" if o_trend > 5 else ("Trending Down" if o_trend < -5 else "Stable")
-                    o_type = "primary" if o_trend > 5 else ("danger" if o_trend < -5 else "warning")
-                    st.markdown(render_metric_card(f"{o_trend:+.1f}%", o_label, o_type), unsafe_allow_html=True)
-                with ocol2:
-                    orders_4wk = forecast_df.head(4)['orders_ensemble'].sum()
-                    st.markdown(render_metric_card(f"${orders_4wk:,.0f}", "Next 4 Weeks", "primary"), unsafe_allow_html=True)
-
-                ocol3, ocol4 = st.columns(2)
-                with ocol3:
-                    orders_8wk = forecast_df.head(8)['orders_ensemble'].sum()
-                    st.markdown(render_metric_card(f"${orders_8wk:,.0f}", "Next 8 Weeks", "primary"), unsafe_allow_html=True)
-                with ocol4:
-                    orders_12wk = forecast_df['orders_ensemble'].sum()
-                    st.markdown(render_metric_card(f"${orders_12wk:,.0f}", "Next 12 Weeks", "primary"), unsafe_allow_html=True)
-
-            with mcol2:
-                st.markdown('<p style="color: #2D2926; font-size: 14px; margin-top: 10px;">📉 <b>Depletion Forecast</b></p>', unsafe_allow_html=True)
-                dcol1, dcol2 = st.columns(2)
-                with dcol1:
-                    d_first = forecast_df.head(6)['depletion_ensemble'].mean()
-                    d_second = forecast_df.tail(6)['depletion_ensemble'].mean()
-                    d_trend = ((d_second - d_first) / d_first * 100) if d_first > 0 else 0
-                    d_label = "Trending Up" if d_trend > 5 else ("Trending Down" if d_trend < -5 else "Stable")
-                    d_type = "primary" if d_trend > 5 else ("danger" if d_trend < -5 else "warning")
-                    st.markdown(render_metric_card(f"{d_trend:+.1f}%", d_label, d_type), unsafe_allow_html=True)
-                with dcol2:
-                    depl_4wk = forecast_df.head(4)['depletion_ensemble'].sum()
-                    st.markdown(render_metric_card(f"{depl_4wk:,.0f} units", "Next 4 Weeks", "primary"), unsafe_allow_html=True)
-
-                dcol3, dcol4 = st.columns(2)
-                with dcol3:
-                    depl_8wk = forecast_df.head(8)['depletion_ensemble'].sum()
-                    st.markdown(render_metric_card(f"{depl_8wk:,.0f} units", "Next 8 Weeks", "primary"), unsafe_allow_html=True)
-                with dcol4:
-                    depl_12wk = forecast_df['depletion_ensemble'].sum()
-                    st.markdown(render_metric_card(f"{depl_12wk:,.0f} units", "Next 12 Weeks", "primary"), unsafe_allow_html=True)
-
-        else:
-            st.info("Not enough historical data to generate forecast (need at least 4 weeks)")
-    else:
-        st.info("No trend data available for forecasting")
+        with fam_col2:
+            # Period totals by family
+            family_totals = family_trend_df.groupby('product_family')['qty_depleted'].sum().sort_values(ascending=False)
+            grand_total = family_totals.sum()
+            for family, total in family_totals.items():
+                pct = round(100 * total / grand_total, 1) if grand_total > 0 else 0
+                st.markdown(render_metric_card(
+                    f"{total:,.0f}",
+                    f"{family} ({pct}%)"
+                ), unsafe_allow_html=True)
 
     # ==================== STOCKOUT RISK & PIPELINE FORECAST ====================
     st.markdown('<p class="section-header">🚨 Stockout Risk & Reorder Recommendations</p>', unsafe_allow_html=True)
