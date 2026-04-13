@@ -928,7 +928,7 @@ def main():
         selected_period = st.selectbox(
             "Period",
             options=period_options,
-            index=5,  # default 90d
+            index=2,  # default YTD
         )
 
     with col_uom:
