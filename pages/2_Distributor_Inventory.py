@@ -28,13 +28,14 @@ inject_editorial_style()
 
 
 COLORS = {
-    'primary': '#00d4aa',
-    'secondary': '#00a3cc',
-    'success': '#64ffda',
-    'warning': '#ffd666',
-    'danger': '#ff6b6b',
-    'info': '#74b9ff',
-    'gradient': ['#00d4aa', '#00a3cc', '#667eea', '#764ba2']
+    'primary': '#1B4965',      # Navy (orders)
+    'secondary': '#85C79D',    # Sage green (depletion)
+    'success': '#85C79D',      # Sage
+    'warning': '#8a6b00',      # Gold
+    'danger': '#b04d5e',       # Muted red
+    'info': '#5FA8D3',         # Soft blue
+    'muted': '#9C9890',        # Warm grey
+    'gradient': ['#1B4965', '#5FA8D3', '#85C79D', '#C4A77D']
 }
 
 
@@ -1170,7 +1171,7 @@ def main():
             marker_color=COLORS['danger'],
             text=[understock_count_chart] if understock_count_chart > 0 else None,
             textposition='inside',
-            textfont=dict(color='white', size=14)
+            textfont=dict(color='#2D2926', size=13, family='Jost')
         ))
 
         fig.add_trace(go.Bar(
@@ -1180,7 +1181,7 @@ def main():
             marker_color=COLORS['success'],
             text=[balanced_count_chart] if balanced_count_chart > 0 else None,
             textposition='inside',
-            textfont=dict(color='white', size=14)
+            textfont=dict(color='#2D2926', size=13, family='Jost')
         ))
 
         fig.add_trace(go.Bar(
@@ -1190,7 +1191,7 @@ def main():
             marker_color=COLORS['warning'],
             text=[overstock_count_chart] if overstock_count_chart > 0 else None,
             textposition='inside',
-            textfont=dict(color='white', size=14)
+            textfont=dict(color='#2D2926', size=13, family='Jost')
         ))
 
         # Second bar: No Depletion Data
@@ -1198,10 +1199,10 @@ def main():
             name='No Depletion Data',
             x=['No Depletion'],
             y=[no_depletion_count_chart],
-            marker_color='#8892b0',
+            marker_color=COLORS['muted'],
             text=[no_depletion_count_chart] if no_depletion_count_chart > 0 else None,
             textposition='inside',
-            textfont=dict(color='white', size=14),
+            textfont=dict(color='#2D2926', size=13, family='Jost'),
             showlegend=True
         ))
 
@@ -1226,7 +1227,7 @@ def main():
 
     if not family_trend_df.empty:
         family_colors = {'Cans': COLORS['primary'], 'Bottles': COLORS['secondary'],
-                         'Shots': COLORS['info'], 'Other': '#8892b0'}
+                         'Shots': COLORS['info'], 'Other': COLORS['muted']}
 
         # Stacked area chart
         fam_col1, fam_col2 = st.columns([2, 1])
@@ -1244,7 +1245,7 @@ def main():
                         mode='lines',
                         name=family,
                         stackgroup='one',
-                        line=dict(width=0.5, color=family_colors.get(family, '#8892b0')),
+                        line=dict(width=0.5, color=family_colors.get(family, COLORS['muted'])),
                         hovertemplate=f'{family}: %{{y:,.0f}} {uom_label.lower()}<extra></extra>'
                     ))
             apply_dark_theme(fig_fam, height=300,
@@ -1269,7 +1270,7 @@ def main():
 
     # ==================== STOCKOUT RISK & PIPELINE FORECAST ====================
     st.markdown('<p class="section-header">🚨 Stockout Risk & Reorder Recommendations</p>', unsafe_allow_html=True)
-    st.markdown('<p style="color: #625f56; font-size: 14px; margin-top: -10px;">Per-distributor stockout predictions with velocity-adjusted forecasting for pipeline planning</p>', unsafe_allow_html=True)
+    st.markdown('<p class="dashboard-subtitle" style="margin-top: -10px;">Per-distributor stockout predictions with velocity-adjusted forecasting for pipeline planning</p>', unsafe_allow_html=True)
 
     # Calculate stockout risk for filtered distributors
     stockout_df = calculate_stockout_risk(filtered_df, dist_trends_df)
@@ -1312,9 +1313,9 @@ def main():
                     'HIGH': COLORS['warning'],
                     'MEDIUM': COLORS['info'],
                     'LOW': COLORS['success'],
-                    'N/A': '#8892b0'
+                    'N/A': COLORS['muted']
                 }
-                bar_colors = [urgency_colors.get(u, '#8892b0') for u in timeline_df['reorder_urgency']]
+                bar_colors = [urgency_colors.get(u, COLORS['muted']) for u in timeline_df['reorder_urgency']]
 
                 fig = go.Figure(go.Bar(
                     x=timeline_df['weeks_until_stockout'],
@@ -1600,11 +1601,11 @@ def main():
                     z=state_df[config['col']],
                     locationmode='USA-states',
                     colorscale=[
-                        [0, '#1a1a2e'],
-                        [0.2, '#0f3460'],
-                        [0.5, '#00a3cc'],
-                        [0.8, '#00d4aa'],
-                        [1, '#64ffda']
+                        [0, '#F5F0EB'],
+                        [0.25, '#C4D9E8'],
+                        [0.5, '#5FA8D3'],
+                        [0.75, '#1B4965'],
+                        [1, '#0D2B3E']
                     ],
                     colorbar=dict(
                         title=dict(text=config['label'], font=dict(color='#2D2926', size=12)),
@@ -1614,7 +1615,7 @@ def main():
                     ),
                     hovertemplate='<b>%{location}</b><br>' +
                                   f'{config["label"]}: %{{z:{config["format"]}}}<extra></extra>',
-                    marker_line_color='rgba(255,255,255,0.3)',
+                    marker_line_color='rgba(45,41,38,0.15)',
                     marker_line_width=0.5
                 ))
 
@@ -1623,10 +1624,11 @@ def main():
                         scope='usa',
                         bgcolor='rgba(0,0,0,0)',
                         lakecolor='rgba(0,0,0,0)',
-                        landcolor='#1a1a2e',
+                        landcolor='#EDE8E3',
                         showlakes=False,
                         showland=True
                     ),
+                    font=dict(family='Jost, Helvetica, sans-serif', color='#2D2926'),
                     paper_bgcolor='rgba(0,0,0,0)',
                     plot_bgcolor='rgba(0,0,0,0)',
                     margin=dict(l=0, r=0, t=0, b=0),
@@ -1645,33 +1647,13 @@ def main():
 
             metric_cols = st.columns(4)
             with metric_cols[0]:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <p class="metric-value">{total_states}</p>
-                    <p class="metric-label">States with Depletion</p>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(render_metric_card(f"{total_states}", "States with Depletion"), unsafe_allow_html=True)
             with metric_cols[1]:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <p class="metric-value">{total_doors:,.0f}</p>
-                    <p class="metric-label">Total Doors (Active)</p>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(render_metric_card(f"{total_doors:,.0f}", "Total Doors (Active)"), unsafe_allow_html=True)
             with metric_cols[2]:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <p class="metric-value">{total_pods:,.0f}</p>
-                    <p class="metric-label">Total PODs</p>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(render_metric_card(f"{total_pods:,.0f}", "Total PODs"), unsafe_allow_html=True)
             with metric_cols[3]:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <p class="metric-value">{top_state}</p>
-                    <p class="metric-label">Top State ({top_state_pct:.1f}%)</p>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(render_metric_card(f"{top_state}", f"Top State ({top_state_pct:.1f}%)"), unsafe_allow_html=True)
 
             # Full-width state table
             st.markdown("**Top States by Depletion**")
@@ -1710,48 +1692,19 @@ def main():
 
             with woi_metric_cols[0]:
                 parent_distros = woi_sku_df['distributor_name'].nunique()
-                st.markdown(f"""
-                <div class="metric-card">
-                    <p class="metric-value">{parent_distros}</p>
-                    <p class="metric-label">Parent Distributors</p>
-                </div>
-                """, unsafe_allow_html=True)
-
+                st.markdown(render_metric_card(f"{parent_distros}", "Parent Distributors"), unsafe_allow_html=True)
             with woi_metric_cols[1]:
                 sku_overstock = len(woi_sku_df[woi_sku_df['inventory_status'] == 'Overstock'])
-                st.markdown(f"""
-                <div class="metric-card">
-                    <p class="metric-value-warning">{sku_overstock}</p>
-                    <p class="metric-label">Overstock Combos</p>
-                </div>
-                """, unsafe_allow_html=True)
-
+                st.markdown(render_metric_card(f"{sku_overstock}", "Overstock Combos", "warning"), unsafe_allow_html=True)
             with woi_metric_cols[2]:
                 sku_understock = len(woi_sku_df[woi_sku_df['inventory_status'] == 'Understock'])
-                st.markdown(f"""
-                <div class="metric-card">
-                    <p class="metric-value-danger">{sku_understock}</p>
-                    <p class="metric-label">Understock Combos</p>
-                </div>
-                """, unsafe_allow_html=True)
-
+                st.markdown(render_metric_card(f"{sku_understock}", "Understock Combos", "danger"), unsafe_allow_html=True)
             with woi_metric_cols[3]:
                 high_velocity = len(woi_sku_df[woi_sku_df['velocity_tier'] == 'High'])
-                st.markdown(f"""
-                <div class="metric-card">
-                    <p class="metric-value">{high_velocity}</p>
-                    <p class="metric-label">High Velocity SKUs</p>
-                </div>
-                """, unsafe_allow_html=True)
-
+                st.markdown(render_metric_card(f"{high_velocity}", "High Velocity SKUs"), unsafe_allow_html=True)
             with woi_metric_cols[4]:
                 total_combos = len(woi_sku_df)
-                st.markdown(f"""
-                <div class="metric-card">
-                    <p class="metric-value">{total_combos:,}</p>
-                    <p class="metric-label">Total SKU × Distro</p>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(render_metric_card(f"{total_combos:,}", "Total SKU x Distro"), unsafe_allow_html=True)
 
             # Charts: Top Overstock and Understock by SKU × Distributor
             woi_chart_cols = st.columns(2)
@@ -1771,7 +1724,7 @@ def main():
                         x=overstock_sku['weeks_of_inventory'],
                         y=overstock_sku['label'],
                         orientation='h',
-                        marker=dict(color='#ffd666'),
+                        marker=dict(color=COLORS['warning']),
                         text=overstock_sku['weeks_of_inventory'].apply(lambda x: f'{x:.0f} wks'),
                         textposition='outside',
                         textfont=dict(color='#2D2926'),
@@ -1781,11 +1734,11 @@ def main():
                     fig.update_layout(
                         paper_bgcolor='rgba(0,0,0,0)',
                         plot_bgcolor='rgba(0,0,0,0)',
-                        font=dict(color='#2D2926'),
+                        font=dict(color='#2D2926', family='Jost, Helvetica, sans-serif'),
                         height=350,
                         margin=dict(l=0, r=60, t=10, b=0),
-                        yaxis=dict(autorange='reversed', gridcolor='rgba(255,255,255,0.1)'),
-                        xaxis=dict(gridcolor='rgba(255,255,255,0.1)')
+                        yaxis=dict(autorange='reversed', gridcolor='rgba(45, 41, 38, 0.08)'),
+                        xaxis=dict(gridcolor='rgba(45, 41, 38, 0.08)')
                     )
                     st.plotly_chart(fig, use_container_width=True)
                 else:
@@ -1806,7 +1759,7 @@ def main():
                         x=understock_sku['weeks_of_inventory'].abs(),
                         y=understock_sku['label'],
                         orientation='h',
-                        marker=dict(color='#ff6b6b'),
+                        marker=dict(color=COLORS['danger']),
                         text=understock_sku['weeks_of_inventory'].apply(lambda x: f'{x:.1f} wks'),
                         textposition='outside',
                         textfont=dict(color='#2D2926'),
@@ -1816,11 +1769,11 @@ def main():
                     fig.update_layout(
                         paper_bgcolor='rgba(0,0,0,0)',
                         plot_bgcolor='rgba(0,0,0,0)',
-                        font=dict(color='#2D2926'),
+                        font=dict(color='#2D2926', family='Jost, Helvetica, sans-serif'),
                         height=350,
                         margin=dict(l=0, r=60, t=10, b=0),
-                        yaxis=dict(autorange='reversed', gridcolor='rgba(255,255,255,0.1)'),
-                        xaxis=dict(gridcolor='rgba(255,255,255,0.1)')
+                        yaxis=dict(autorange='reversed', gridcolor='rgba(45, 41, 38, 0.08)'),
+                        xaxis=dict(gridcolor='rgba(45, 41, 38, 0.08)')
                     )
                     st.plotly_chart(fig, use_container_width=True)
                 else:
@@ -1888,19 +1841,19 @@ def main():
                         x=pivot_df.columns.tolist(),
                         y=pivot_df.index.tolist(),
                         colorscale=[
-                            [0, '#ff6b6b'],      # Red = negative/understock
-                            [0.25, '#ff9f43'],   # Orange
-                            [0.4, '#64ffda'],    # Green = balanced (around 4 weeks)
-                            [0.6, '#64ffda'],    # Green
-                            [0.75, '#ffd666'],   # Yellow = overstock
-                            [1, '#ffd666']       # Yellow = high overstock
+                            [0, '#b04d5e'],      # Muted red = understock
+                            [0.25, '#D4917A'],   # Warm salmon
+                            [0.4, '#85C79D'],    # Sage green = balanced
+                            [0.6, '#85C79D'],    # Sage green
+                            [0.75, '#C4A77D'],   # Warm gold = overstock
+                            [1, '#8a6b00']       # Deep gold = high overstock
                         ],
                         zmin=-52,
                         zmax=52,
                         zmid=4,
                         text=pivot_df.values.round(1),
                         texttemplate='%{text}',
-                        textfont={"size": 14, "color": "#1a1a2e", "family": "Arial Black"},
+                        textfont={"size": 13, "color": "#2D2926", "family": "Jost, Helvetica, sans-serif"},
                         hovertemplate='<b>%{y}</b><br>%{x}<br>WOI: %{z:.1f} weeks<extra></extra>'
                     ))
 
@@ -2007,7 +1960,7 @@ def main():
 
     # Footer
     st.markdown(f"""
-    <div style="text-align: center; color: #625f56; margin-top: 48px; padding: 24px; border-top: 1px solid rgba(255,255,255,0.1);">
+    <div style="text-align: center; color: #625f56; margin-top: 48px; padding: 24px; border-top: 1px solid rgba(45,41,38,0.1);">
         <p style="margin: 0;">Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} UTC</p>
         <p style="margin: 4px 0 0 0; font-size: 12px;">Data refreshes every 5 minutes | Lookback: {lookback_days} days</p>
     </div>
