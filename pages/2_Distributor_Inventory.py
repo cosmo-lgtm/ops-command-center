@@ -125,7 +125,8 @@ def load_inventory_data(lookback_days: int = 90):
             MAX(sfo.order_date) as last_order_date
         FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
         LEFT JOIN sku_map sm ON sfo.sku = sm.sf_sku
-        WHERE sfo.order_status != 'Draft'
+        WHERE sfo.account_type IN ('Distributor', 'Distribution Center')
+            AND sfo.order_status != 'Draft'
             AND sfo.order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
             AND sfo.order_date <= CURRENT_DATE()
             AND (sfo.pricebook_name IS NULL OR (
@@ -133,6 +134,22 @@ def load_inventory_data(lookback_days: int = 90):
                 AND LOWER(sfo.pricebook_name) NOT LIKE '%suggested%'
             ))
         GROUP BY account_id, customer_name
+    ),
+
+    -- All-channel revenue (includes D2R, Key Accounts, etc.)
+    all_channel_revenue AS (
+        SELECT
+            SUM(CAST(sfo.line_total_price AS FLOAT64)) as total_revenue,
+            SUM(CAST(sfo.quantity AS INT64) * COALESCE(sm.pack_size, 1)) as total_units
+        FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
+        LEFT JOIN sku_map sm ON sfo.sku = sm.sf_sku
+        WHERE sfo.order_status != 'Draft'
+            AND sfo.order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
+            AND sfo.order_date <= CURRENT_DATE()
+            AND (sfo.pricebook_name IS NULL OR (
+                LOWER(sfo.pricebook_name) NOT LIKE '%sample%'
+                AND LOWER(sfo.pricebook_name) NOT LIKE '%suggested%'
+            ))
     ),
 
     -- VIP depletion by distributor (last N days)
@@ -245,6 +262,8 @@ def load_inventory_data(lookback_days: int = 90):
         qty_ordered as total_qty_ordered,
         order_value as total_order_value,
         order_count as total_orders,
+        acr.total_revenue as all_channel_revenue,
+        acr.total_units as all_channel_units,
         COALESCE(total_qty_depleted, 0) as total_qty_depleted,
         COALESCE(unique_stores, 0) as unique_stores,
         COALESCE(depletion_transactions, 0) as depletion_transactions,
@@ -277,6 +296,7 @@ def load_inventory_data(lookback_days: int = 90):
         END as inventory_status
 
     FROM combined
+    CROSS JOIN all_channel_revenue acr
     ORDER BY order_value DESC
     """
     return client.query(query).to_dataframe()
@@ -421,7 +441,8 @@ def load_trend_data(lookback_weeks: int = 12):
             COUNT(DISTINCT sfo.order_id) as order_count
         FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
         LEFT JOIN sku_map sm ON sfo.sku = sm.sf_sku
-        WHERE sfo.order_status != 'Draft'
+        WHERE sfo.account_type IN ('Distributor', 'Distribution Center')
+            AND sfo.order_status != 'Draft'
             AND sfo.order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_weeks} WEEK)
             AND sfo.order_date <= CURRENT_DATE()
             AND (sfo.pricebook_name IS NULL OR (
@@ -1015,6 +1036,10 @@ def main():
 
     # Calculate summary stats
     total_distributors = len(filtered_df)
+    # All-channel revenue/units (includes D2R, Key Accounts — same as Field Sales dash)
+    all_channel_rev = filtered_df['all_channel_revenue'].iloc[0] if not filtered_df.empty else 0
+    all_channel_units_total = filtered_df['all_channel_units'].iloc[0] if not filtered_df.empty else 0
+    # Distributor-only metrics for inventory analysis
     total_order_value = filtered_df['total_order_value'].sum()
     total_qty_ordered = filtered_df['total_qty_ordered'].sum()
     total_qty_depleted = filtered_df['total_qty_depleted'].sum()
@@ -1048,8 +1073,8 @@ def main():
 
     with col2:
         st.markdown(render_metric_card(
-            f"${total_order_value/1000000:.1f}M",
-            f"Order Value ({period_label})"
+            f"${all_channel_rev/1000000:.1f}M",
+            f"Total Revenue ({period_label})"
         ), unsafe_allow_html=True)
 
     with col3:
