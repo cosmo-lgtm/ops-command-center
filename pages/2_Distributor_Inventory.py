@@ -102,9 +102,17 @@ def load_inventory_data(lookback_days: int = 90):
         FROM `artful-logic-475116-p1.staging_vip.sku_mapping`
     ),
 
+    -- VIP item master: units_per_case for UOM conversion
+    vip_item_units AS (
+        SELECT SupplierItem as item_code, SAFE_CAST(Units AS INT64) as units_per_case
+        FROM `artful-logic-475116-p1.raw_vip.items`
+        WHERE SupplierItem IS NOT NULL
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY SupplierItem ORDER BY _airbyte_extracted_at DESC) = 1
+    ),
+
     -- Salesforce orders to distributors (last N days)
     -- Excludes Draft orders
-    -- IMPORTANT: Multiply by pack_size to convert cases → units (VIP depletion is in units)
+    -- Multiply by pack_size to convert cases → individual units
     sf_orders AS (
         SELECT
             sfo.account_id,
@@ -129,19 +137,22 @@ def load_inventory_data(lookback_days: int = 90):
 
     -- VIP depletion by distributor (last N days)
     -- Uses raw sales_lite for fresh data
-    -- UOM=B (bottles) converted to case-equivalents (÷6)
+    -- Normalized to individual units using items.Units per case:
+    --   UOM=C (cases): Qty × units_per_case → individual units
+    --   UOM=B (bottles/cans/shots): Qty already in individual units
     vip_depletion AS (
         SELECT
             sl.Dist_Code as distributor_code,
-            SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64)
-                     WHEN sl.UOM = 'B' THEN ROUND(SAFE_CAST(sl.Qty AS INT64) / 6.0)
-                     ELSE SAFE_CAST(sl.Qty AS INT64) END) as qty_depleted,
+            SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64) * COALESCE(iu.units_per_case, 6)
+                     WHEN sl.UOM = 'B' THEN SAFE_CAST(sl.Qty AS INT64)
+                     ELSE SAFE_CAST(sl.Qty AS INT64) * COALESCE(iu.units_per_case, 6) END) as qty_depleted,
             COUNT(DISTINCT sl.Acct_Code) as stores_reached,
             COUNT(*) as transaction_count,
-            SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64)
-                     WHEN sl.UOM = 'B' THEN ROUND(SAFE_CAST(sl.Qty AS INT64) / 6.0)
-                     ELSE SAFE_CAST(sl.Qty AS INT64) END) / ({lookback_days} / 7.0) as weekly_depletion_rate
+            SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64) * COALESCE(iu.units_per_case, 6)
+                     WHEN sl.UOM = 'B' THEN SAFE_CAST(sl.Qty AS INT64)
+                     ELSE SAFE_CAST(sl.Qty AS INT64) * COALESCE(iu.units_per_case, 6) END) / ({lookback_days} / 7.0) as weekly_depletion_rate
         FROM `artful-logic-475116-p1.raw_vip.sales_lite` sl
+        LEFT JOIN vip_item_units iu ON sl.Item_Code = iu.item_code
         WHERE SAFE.PARSE_DATE('%Y%m%d', sl.Invoice_Date) >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
             AND SAFE_CAST(sl.Qty AS INT64) > 0  -- Positive sales only
             AND sl.Item_Code NOT LIKE '99Z%'    -- Exclude adjustments
@@ -248,10 +259,10 @@ def load_inventory_data(lookback_days: int = 90):
             ELSE NULL
         END as order_depletion_ratio,
 
-        -- Weeks of Inventory
+        -- Weeks of Inventory (implied inventory delta / weekly burn rate)
         CASE
             WHEN COALESCE(weekly_depletion_rate, 0) > 0
-            THEN ROUND(qty_ordered / weekly_depletion_rate, 1)
+            THEN ROUND((qty_ordered - COALESCE(total_qty_depleted, 0)) / weekly_depletion_rate, 1)
             ELSE NULL
         END as weeks_of_inventory,
 
@@ -288,33 +299,35 @@ def load_product_level_data(distributor_codes: list = None, lookback_days: int =
         SELECT
             SupplierItem as item_code,
             `Desc` as item_description,
-            BrandDesc
+            BrandDesc,
+            SAFE_CAST(Units AS INT64) as units_per_case
         FROM `artful-logic-475116-p1.raw_vip.items`
         WHERE SupplierItem IS NOT NULL
         QUALIFY ROW_NUMBER() OVER (PARTITION BY SupplierItem ORDER BY _airbyte_extracted_at DESC) = 1
     )
     -- Uses raw sales_lite for fresh data
+    -- All quantities normalized to individual units via items.Units
     SELECT
         d.distributor_code,
         d.distributor_name,
         sl.Item_Code,
         COALESCE(i.item_description, sl.Item_Code) as product_name,
         i.BrandDesc as brand,
-        SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64)
-                 WHEN sl.UOM = 'B' THEN ROUND(SAFE_CAST(sl.Qty AS INT64) / 6.0)
-                 ELSE SAFE_CAST(sl.Qty AS INT64) END) as qty_depleted,
+        SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64) * COALESCE(i.units_per_case, 6)
+                 WHEN sl.UOM = 'B' THEN SAFE_CAST(sl.Qty AS INT64)
+                 ELSE SAFE_CAST(sl.Qty AS INT64) * COALESCE(i.units_per_case, 6) END) as qty_depleted,
         COUNT(DISTINCT sl.Acct_Code) as stores_reached,
         COUNT(*) as transaction_count,
-        ROUND(SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64)
-                       WHEN sl.UOM = 'B' THEN ROUND(SAFE_CAST(sl.Qty AS INT64) / 6.0)
-                       ELSE SAFE_CAST(sl.Qty AS INT64) END) / ({lookback_days} / 7.0), 1) as weekly_depletion_rate,
+        ROUND(SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64) * COALESCE(i.units_per_case, 6)
+                       WHEN sl.UOM = 'B' THEN SAFE_CAST(sl.Qty AS INT64)
+                       ELSE SAFE_CAST(sl.Qty AS INT64) * COALESCE(i.units_per_case, 6) END) / ({lookback_days} / 7.0), 1) as weekly_depletion_rate,
         CASE
-            WHEN SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64)
-                          WHEN sl.UOM = 'B' THEN ROUND(SAFE_CAST(sl.Qty AS INT64) / 6.0)
-                          ELSE SAFE_CAST(sl.Qty AS INT64) END) / ({lookback_days} / 7.0) >= 10 THEN 'High Velocity'
-            WHEN SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64)
-                          WHEN sl.UOM = 'B' THEN ROUND(SAFE_CAST(sl.Qty AS INT64) / 6.0)
-                          ELSE SAFE_CAST(sl.Qty AS INT64) END) / ({lookback_days} / 7.0) >= 3 THEN 'Medium Velocity'
+            WHEN SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64) * COALESCE(i.units_per_case, 6)
+                          WHEN sl.UOM = 'B' THEN SAFE_CAST(sl.Qty AS INT64)
+                          ELSE SAFE_CAST(sl.Qty AS INT64) * COALESCE(i.units_per_case, 6) END) / ({lookback_days} / 7.0) >= 60 THEN 'High Velocity'
+            WHEN SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64) * COALESCE(i.units_per_case, 6)
+                          WHEN sl.UOM = 'B' THEN SAFE_CAST(sl.Qty AS INT64)
+                          ELSE SAFE_CAST(sl.Qty AS INT64) * COALESCE(i.units_per_case, 6) END) / ({lookback_days} / 7.0) >= 18 THEN 'Medium Velocity'
             ELSE 'Low Velocity'
         END as velocity_status
     FROM `artful-logic-475116-p1.raw_vip.sales_lite` sl
@@ -341,18 +354,26 @@ def load_state_depletion_data(lookback_days: int = 90):
     query = f"""
     -- Uses raw sales_lite for fresh data
     -- POD = Points of Distribution = unique (door, SKU) combinations
-    WITH state_depletion AS (
+    -- All quantities normalized to individual units via items.Units
+    WITH vip_item_units AS (
+        SELECT SupplierItem as item_code, SAFE_CAST(Units AS INT64) as units_per_case
+        FROM `artful-logic-475116-p1.raw_vip.items`
+        WHERE SupplierItem IS NOT NULL
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY SupplierItem ORDER BY _airbyte_extracted_at DESC) = 1
+    ),
+    state_depletion AS (
         SELECT
             d.State as state,
             CAST(d.Distributor_ID AS STRING) as distributor_code,
-            SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64)
-                     WHEN sl.UOM = 'B' THEN ROUND(SAFE_CAST(sl.Qty AS INT64) / 6.0)
-                     ELSE SAFE_CAST(sl.Qty AS INT64) END) as qty_depleted,
+            SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64) * COALESCE(iu.units_per_case, 6)
+                     WHEN sl.UOM = 'B' THEN SAFE_CAST(sl.Qty AS INT64)
+                     ELSE SAFE_CAST(sl.Qty AS INT64) * COALESCE(iu.units_per_case, 6) END) as qty_depleted,
             COUNT(DISTINCT sl.Acct_Code) as stores_reached,
             COUNT(DISTINCT CONCAT(sl.Acct_Code, '|', sl.Item_Code)) as pod_count
         FROM `artful-logic-475116-p1.raw_vip.sales_lite` sl
         JOIN `artful-logic-475116-p1.raw_vip.distributors` d
             ON sl.Dist_Code = CAST(d.Distributor_ID AS STRING)
+        LEFT JOIN vip_item_units iu ON sl.Item_Code = iu.item_code
         WHERE SAFE.PARSE_DATE('%Y%m%d', sl.Invoice_Date) >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
             AND SAFE_CAST(sl.Qty AS INT64) > 0  -- Positive sales only
             AND sl.Item_Code NOT LIKE '99Z%'    -- Exclude adjustments
@@ -411,20 +432,29 @@ def load_trend_data(lookback_weeks: int = 12):
         GROUP BY week_start
     ),
 
+    -- VIP item master: units_per_case for UOM conversion
+    vip_item_units AS (
+        SELECT SupplierItem as item_code, SAFE_CAST(Units AS INT64) as units_per_case
+        FROM `artful-logic-475116-p1.raw_vip.items`
+        WHERE SupplierItem IS NOT NULL
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY SupplierItem ORDER BY _airbyte_extracted_at DESC) = 1
+    ),
+
     -- Weekly VIP depletion (uses raw sales_lite for fresh data)
-    -- UOM=B (bottles) converted to case-equivalents (÷6)
+    -- Normalized to individual units via items.Units
     weekly_depletion AS (
         SELECT
-            DATE_TRUNC(SAFE.PARSE_DATE('%Y%m%d', Invoice_Date), WEEK) as week_start,
-            SUM(CASE WHEN UOM = 'C' THEN SAFE_CAST(Qty AS INT64)
-                     WHEN UOM = 'B' THEN ROUND(SAFE_CAST(Qty AS INT64) / 6.0)
-                     ELSE SAFE_CAST(Qty AS INT64) END) as qty_depleted,
-            COUNT(DISTINCT Acct_Code) as stores_reached
-        FROM `artful-logic-475116-p1.raw_vip.sales_lite`
-        WHERE SAFE.PARSE_DATE('%Y%m%d', Invoice_Date) >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_weeks} WEEK)
-            AND SAFE_CAST(Qty AS INT64) > 0  -- Positive sales only
-            AND Item_Code NOT LIKE '99Z%'    -- Exclude adjustments
-            AND Item_Code != 'XXXXXX'        -- Exclude placeholder items
+            DATE_TRUNC(SAFE.PARSE_DATE('%Y%m%d', sl.Invoice_Date), WEEK) as week_start,
+            SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64) * COALESCE(iu.units_per_case, 6)
+                     WHEN sl.UOM = 'B' THEN SAFE_CAST(sl.Qty AS INT64)
+                     ELSE SAFE_CAST(sl.Qty AS INT64) * COALESCE(iu.units_per_case, 6) END) as qty_depleted,
+            COUNT(DISTINCT sl.Acct_Code) as stores_reached
+        FROM `artful-logic-475116-p1.raw_vip.sales_lite` sl
+        LEFT JOIN vip_item_units iu ON sl.Item_Code = iu.item_code
+        WHERE SAFE.PARSE_DATE('%Y%m%d', sl.Invoice_Date) >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_weeks} WEEK)
+            AND SAFE_CAST(sl.Qty AS INT64) > 0  -- Positive sales only
+            AND sl.Item_Code NOT LIKE '99Z%'    -- Exclude adjustments
+            AND sl.Item_Code != 'XXXXXX'        -- Exclude placeholder items
         GROUP BY week_start
     )
 
@@ -449,20 +479,27 @@ def load_distributor_weekly_trends(lookback_weeks: int = 12):
     client = get_bq_client()
 
     query = f"""
-    WITH weekly_by_dist AS (
+    WITH vip_item_units AS (
+        SELECT SupplierItem as item_code, SAFE_CAST(Units AS INT64) as units_per_case
+        FROM `artful-logic-475116-p1.raw_vip.items`
+        WHERE SupplierItem IS NOT NULL
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY SupplierItem ORDER BY _airbyte_extracted_at DESC) = 1
+    ),
+    weekly_by_dist AS (
         SELECT
             d.distributor_code,
             d.distributor_name,
             DATE_TRUNC(SAFE.PARSE_DATE('%Y%m%d', sl.Invoice_Date), WEEK) as week_start,
-            SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64)
-                     WHEN sl.UOM = 'B' THEN ROUND(SAFE_CAST(sl.Qty AS INT64) / 6.0)
-                     ELSE SAFE_CAST(sl.Qty AS INT64) END) as qty_depleted,
+            SUM(CASE WHEN sl.UOM = 'C' THEN SAFE_CAST(sl.Qty AS INT64) * COALESCE(iu.units_per_case, 6)
+                     WHEN sl.UOM = 'B' THEN SAFE_CAST(sl.Qty AS INT64)
+                     ELSE SAFE_CAST(sl.Qty AS INT64) * COALESCE(iu.units_per_case, 6) END) as qty_depleted,
             COUNT(DISTINCT sl.Acct_Code) as stores_reached,
             COUNT(DISTINCT sl.Item_Code) as skus_sold
         FROM `artful-logic-475116-p1.raw_vip.sales_lite` sl
         JOIN `artful-logic-475116-p1.staging_vip.distributor_fact_sheet_2026` d
             ON sl.Dist_Code = d.distributor_code
             AND NOT d.is_parent_rollup
+        LEFT JOIN vip_item_units iu ON sl.Item_Code = iu.item_code
         WHERE SAFE.PARSE_DATE('%Y%m%d', sl.Invoice_Date) >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_weeks} WEEK)
             AND SAFE_CAST(sl.Qty AS INT64) > 0  -- Positive sales only
             AND sl.Item_Code NOT LIKE '99Z%'    -- Exclude adjustments
@@ -1022,9 +1059,9 @@ def main():
             ))
 
             apply_dark_theme(fig, height=350,
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#8892b0')),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#2D2926')),
                 hovermode='x unified',
-                yaxis=dict(title=dict(text='Units', font=dict(color='#ccd6f6')), tickfont=dict(color='#ccd6f6'), tickformat=',.0f')
+                yaxis=dict(title=dict(text='Units', font=dict(color='#2D2926')), tickfont=dict(color='#625f56'), tickformat=',.0f')
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
@@ -1095,15 +1132,15 @@ def main():
                 y=1.02,
                 xanchor="center",
                 x=0.5,
-                font=dict(color='#8892b0', size=10)
+                font=dict(color='#2D2926', size=10)
             ),
-            xaxis=dict(tickfont=dict(color='#ccd6f6'))
+            xaxis=dict(tickfont=dict(color='#625f56'))
         )
         st.plotly_chart(fig, use_container_width=True)
 
     # Forecast Section: 3-Month Orders & Depletion Forecast with Cone of Certainty
     st.markdown('<p class="section-header">📈 3-Month Forecast</p>', unsafe_allow_html=True)
-    st.markdown('<p style="color: #8892b0; font-size: 14px; margin-top: -10px;">Ensemble forecast using Linear Regression, Exponential Smoothing, and Moving Average with Trend</p>', unsafe_allow_html=True)
+    st.markdown('<p style="color: #625f56; font-size: 14px; margin-top: -10px;">Ensemble forecast using Linear Regression, Exponential Smoothing, and Moving Average with Trend</p>', unsafe_allow_html=True)
 
     if not forecast_trend_df.empty:
         forecast_result = generate_ensemble_forecast(forecast_trend_df, forecast_weeks=12)
@@ -1115,7 +1152,7 @@ def main():
             fchart1, fchart2 = st.columns(2)
 
             with fchart1:
-                st.markdown('<p style="color: #ccd6f6; font-size: 16px; font-weight: 600;">Orders Forecast</p>', unsafe_allow_html=True)
+                st.markdown('<p style="color: #2D2926; font-size: 16px; font-weight: 600;">Orders Forecast</p>', unsafe_allow_html=True)
                 fig_orders = go.Figure()
 
                 # Historical orders line (in $K for readability)
@@ -1185,7 +1222,7 @@ def main():
                 )
 
                 apply_dark_theme(fig_orders, height=300,
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#8892b0', size=9)),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#2D2926', size=9)),
                     hovermode='x unified'
                 )
                 fig_orders.update_layout(
@@ -1195,7 +1232,7 @@ def main():
                 st.plotly_chart(fig_orders, use_container_width=True)
 
             with fchart2:
-                st.markdown('<p style="color: #ccd6f6; font-size: 16px; font-weight: 600;">Depletion Forecast</p>', unsafe_allow_html=True)
+                st.markdown('<p style="color: #2D2926; font-size: 16px; font-weight: 600;">Depletion Forecast</p>', unsafe_allow_html=True)
                 fig_depl = go.Figure()
 
                 # Historical depletion line
@@ -1261,7 +1298,7 @@ def main():
                 )
 
                 apply_dark_theme(fig_depl, height=300,
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#8892b0', size=9)),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#2D2926', size=9)),
                     hovermode='x unified'
                 )
                 fig_depl.update_layout(yaxis_title="Units Depleted")
@@ -1271,7 +1308,7 @@ def main():
             mcol1, mcol2 = st.columns(2)
 
             with mcol1:
-                st.markdown('<p style="color: #ccd6f6; font-size: 14px; margin-top: 10px;">📦 <b>Orders Forecast</b></p>', unsafe_allow_html=True)
+                st.markdown('<p style="color: #2D2926; font-size: 14px; margin-top: 10px;">📦 <b>Orders Forecast</b></p>', unsafe_allow_html=True)
                 ocol1, ocol2 = st.columns(2)
                 with ocol1:
                     o_first = forecast_df.head(6)['orders_ensemble'].mean()
@@ -1293,7 +1330,7 @@ def main():
                     st.markdown(render_metric_card(f"${orders_12wk:,.0f}", "Next 12 Weeks", "primary"), unsafe_allow_html=True)
 
             with mcol2:
-                st.markdown('<p style="color: #ccd6f6; font-size: 14px; margin-top: 10px;">📉 <b>Depletion Forecast</b></p>', unsafe_allow_html=True)
+                st.markdown('<p style="color: #2D2926; font-size: 14px; margin-top: 10px;">📉 <b>Depletion Forecast</b></p>', unsafe_allow_html=True)
                 dcol1, dcol2 = st.columns(2)
                 with dcol1:
                     d_first = forecast_df.head(6)['depletion_ensemble'].mean()
@@ -1321,7 +1358,7 @@ def main():
 
     # ==================== STOCKOUT RISK & PIPELINE FORECAST ====================
     st.markdown('<p class="section-header">🚨 Stockout Risk & Reorder Recommendations</p>', unsafe_allow_html=True)
-    st.markdown('<p style="color: #8892b0; font-size: 14px; margin-top: -10px;">Per-distributor stockout predictions with velocity-adjusted forecasting for pipeline planning</p>', unsafe_allow_html=True)
+    st.markdown('<p style="color: #625f56; font-size: 14px; margin-top: -10px;">Per-distributor stockout predictions with velocity-adjusted forecasting for pipeline planning</p>', unsafe_allow_html=True)
 
     # Calculate stockout risk for filtered distributors
     stockout_df = calculate_stockout_risk(filtered_df, dist_trends_df)
@@ -1375,7 +1412,7 @@ def main():
                     marker=dict(color=bar_colors),
                     text=timeline_df.apply(lambda r: f"{r['weeks_until_stockout']:.1f} wks ({r['reorder_urgency']})", axis=1),
                     textposition='outside',
-                    textfont=dict(color='#ccd6f6', size=10),
+                    textfont=dict(color='#2D2926', size=10),
                     hovertemplate='%{y}<br>Weeks to Stockout: %{x:.1f}<br>Stockout Date: %{customdata}<extra></extra>',
                     customdata=timeline_df['predicted_stockout_date'].apply(lambda d: d.strftime('%b %d') if d else 'N/A')
                 ))
@@ -1418,7 +1455,7 @@ def main():
                 apply_dark_theme(fig, height=400,
                     xaxis={'title': 'Weeks Until Stockout'},
                     yaxis={'title': 'Risk Score (0-100)'},
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#8892b0')))
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#2D2926')))
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info("No risk data available")
@@ -1500,7 +1537,7 @@ def main():
                 marker=dict(color=COLORS['warning']),
                 text=overstock_df['weeks_of_inventory'].apply(lambda x: f'{x:.0f} wks'),
                 textposition='outside',
-                textfont=dict(color='#ccd6f6'),
+                textfont=dict(color='#2D2926'),
                 hovertemplate='%{y}<br>Weeks: %{x:.1f}<extra></extra>'
             ))
 
@@ -1522,7 +1559,7 @@ def main():
                 marker=dict(color=COLORS['danger']),
                 text=understock_df['weeks_of_inventory'].apply(lambda x: f'{x:.1f} wks'),
                 textposition='outside',
-                textfont=dict(color='#ccd6f6'),
+                textfont=dict(color='#2D2926'),
                 hovertemplate='%{y}<br>Weeks: %{x:.1f}<extra></extra>'
             ))
 
@@ -1603,7 +1640,7 @@ def main():
                     marker=dict(colors=[COLORS['success'], COLORS['warning'], COLORS['info']]),
                     textinfo='label+percent',
                     textposition='outside',
-                    textfont=dict(color='#ccd6f6')
+                    textfont=dict(color='#2D2926')
                 )])
 
                 apply_dark_theme(fig, height=400, showlegend=False)
@@ -1659,8 +1696,8 @@ def main():
                         [1, '#64ffda']
                     ],
                     colorbar=dict(
-                        title=dict(text=config['label'], font=dict(color='#ccd6f6', size=12)),
-                        tickfont=dict(color='#8892b0', size=10),
+                        title=dict(text=config['label'], font=dict(color='#2D2926', size=12)),
+                        tickfont=dict(color='#2D2926', size=10),
                         thickness=15,
                         len=0.7
                     ),
@@ -1826,14 +1863,14 @@ def main():
                         marker=dict(color='#ffd666'),
                         text=overstock_sku['weeks_of_inventory'].apply(lambda x: f'{x:.0f} wks'),
                         textposition='outside',
-                        textfont=dict(color='#ccd6f6'),
+                        textfont=dict(color='#2D2926'),
                         hovertemplate='%{y}<br>WOI: %{x:.1f} weeks<extra></extra>'
                     ))
 
                     fig.update_layout(
                         paper_bgcolor='rgba(0,0,0,0)',
                         plot_bgcolor='rgba(0,0,0,0)',
-                        font=dict(color='#ccd6f6'),
+                        font=dict(color='#2D2926'),
                         height=350,
                         margin=dict(l=0, r=60, t=10, b=0),
                         yaxis=dict(autorange='reversed', gridcolor='rgba(255,255,255,0.1)'),
@@ -1861,14 +1898,14 @@ def main():
                         marker=dict(color='#ff6b6b'),
                         text=understock_sku['weeks_of_inventory'].apply(lambda x: f'{x:.1f} wks'),
                         textposition='outside',
-                        textfont=dict(color='#ccd6f6'),
+                        textfont=dict(color='#2D2926'),
                         hovertemplate='%{y}<br>WOI: %{text}<extra></extra>'
                     ))
 
                     fig.update_layout(
                         paper_bgcolor='rgba(0,0,0,0)',
                         plot_bgcolor='rgba(0,0,0,0)',
-                        font=dict(color='#ccd6f6'),
+                        font=dict(color='#2D2926'),
                         height=350,
                         margin=dict(l=0, r=60, t=10, b=0),
                         yaxis=dict(autorange='reversed', gridcolor='rgba(255,255,255,0.1)'),
@@ -1959,16 +1996,16 @@ def main():
                     fig.update_layout(
                         paper_bgcolor='rgba(0,0,0,0)',
                         plot_bgcolor='rgba(0,0,0,0)',
-                        font=dict(color='#ccd6f6', size=12),
+                        font=dict(color='#2D2926', size=12),
                         height=600,
                         margin=dict(l=250, r=50, t=80, b=30),
                         xaxis=dict(
                             tickangle=0,
-                            tickfont=dict(size=12, color='#ccd6f6'),
+                            tickfont=dict(size=12, color='#2D2926'),
                             side='top'
                         ),
                         yaxis=dict(
-                            tickfont=dict(size=11, color='#ccd6f6'),
+                            tickfont=dict(size=11, color='#2D2926'),
                             automargin=True
                         ),
                         coloraxis_colorbar=dict(
@@ -2059,7 +2096,7 @@ def main():
 
     # Footer
     st.markdown(f"""
-    <div style="text-align: center; color: #8892b0; margin-top: 48px; padding: 24px; border-top: 1px solid rgba(255,255,255,0.1);">
+    <div style="text-align: center; color: #625f56; margin-top: 48px; padding: 24px; border-top: 1px solid rgba(255,255,255,0.1);">
         <p style="margin: 0;">Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} UTC</p>
         <p style="margin: 4px 0 0 0; font-size: 12px;">Data refreshes every 5 minutes | Lookback: {lookback_days} days</p>
     </div>

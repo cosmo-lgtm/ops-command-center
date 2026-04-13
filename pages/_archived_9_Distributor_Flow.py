@@ -88,7 +88,7 @@ def load_weekly_trend():
     WITH weekly_orders AS (
       SELECT
         DATE_TRUNC(order_date, WEEK) as week_start,
-        SUM(CAST(quantity AS FLOAT64)) as cases_ordered,
+        SUM(CAST(quantity AS FLOAT64)) as units_ordered,
         ROUND(SUM(CAST(line_total_price AS FLOAT64)), 0) as order_value
       FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened`
       WHERE account_type = 'Distributor'
@@ -98,7 +98,7 @@ def load_weekly_trend():
     weekly_depletion AS (
       SELECT
         DATE_TRUNC(SAFE.PARSE_DATE('%Y%m%d', Invoice_Date), WEEK) as week_start,
-        SUM(SAFE_CAST(Qty AS FLOAT64)) as cases_depleted
+        SUM(SAFE_CAST(Qty AS FLOAT64)) as units_depleted
       FROM `artful-logic-475116-p1.raw_vip.sales_lite`
       WHERE SAFE_CAST(Qty AS FLOAT64) > 0
         AND SAFE.PARSE_DATE('%Y%m%d', Invoice_Date) >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 WEEK)
@@ -106,9 +106,9 @@ def load_weekly_trend():
     )
     SELECT
       COALESCE(wo.week_start, wd.week_start) as week_start,
-      COALESCE(wo.cases_ordered, 0) as cases_ordered,
+      COALESCE(wo.units_ordered, 0) as units_ordered,
       COALESCE(wo.order_value, 0) as order_value,
-      COALESCE(wd.cases_depleted, 0) as cases_depleted
+      COALESCE(wd.units_depleted, 0) as units_depleted
     FROM weekly_orders wo
     FULL OUTER JOIN weekly_depletion wd ON wo.week_start = wd.week_start
     WHERE COALESCE(wo.week_start, wd.week_start) IS NOT NULL
@@ -162,14 +162,14 @@ with tab1:
     # KPIs - all metrics in CASES
     col1, col2, col3, col4, col5 = st.columns(5)
     total_order_value = flow_df['order_value'].sum()
-    total_cases_ordered = flow_df['cases_ordered'].sum()
-    total_cases_depleted = flow_df['cases_depleted'].sum()
-    flow_ratio = total_cases_ordered / total_cases_depleted if total_cases_depleted > 0 else 0
+    total_units_ordered = flow_df['units_ordered'].sum()
+    total_units_depleted = flow_df['units_depleted'].sum()
+    flow_ratio = total_units_ordered / total_units_depleted if total_units_depleted > 0 else 0
     active_distributors = len(flow_df[flow_df['has_sf_orders']])
 
     col1.metric("Order Value (90d)", format_currency(total_order_value))
-    col2.metric("Cases Ordered", format_number(total_cases_ordered))
-    col3.metric("Cases Depleted", format_number(total_cases_depleted))
+    col2.metric("Units Ordered", format_number(total_units_ordered))
+    col3.metric("Units Depleted", format_number(total_units_depleted))
     col4.metric("Flow Ratio", f"{flow_ratio:.2f}x", help=">1 = building inventory")
     col5.metric("Active Distributors", active_distributors)
 
@@ -181,10 +181,10 @@ with tab1:
         st.subheader("Weekly Flow Trend (Cases)")
         if not trend_df.empty:
             fig = go.Figure()
-            fig.add_trace(go.Bar(x=trend_df['week_start'], y=trend_df['cases_ordered'],
-                                 name='Cases Ordered', marker_color='#2E86AB'))
-            fig.add_trace(go.Scatter(x=trend_df['week_start'], y=trend_df['cases_depleted'],
-                                     name='Cases Depleted', line=dict(color='#E94F37', width=3)))
+            fig.add_trace(go.Bar(x=trend_df['week_start'], y=trend_df['units_ordered'],
+                                 name='Units Ordered', marker_color='#2E86AB'))
+            fig.add_trace(go.Scatter(x=trend_df['week_start'], y=trend_df['units_depleted'],
+                                     name='Units Depleted', line=dict(color='#E94F37', width=3)))
             fig.update_layout(barmode='group', height=350, margin=dict(l=20, r=20, t=20, b=20),
                               legend=dict(orientation="h", yanchor="bottom", y=1.02),
                               paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
@@ -209,18 +209,18 @@ with tab1:
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("🏆 Top 5 by Order Value")
-        top_5 = flow_df.nlargest(5, 'order_value')[['parent_name', 'order_value', 'cases_ordered', 'flow_status']].copy()
+        top_5 = flow_df.nlargest(5, 'order_value')[['parent_name', 'order_value', 'units_ordered', 'flow_status']].copy()
         top_5['order_value'] = top_5['order_value'].apply(format_currency)
-        top_5['cases_ordered'] = top_5['cases_ordered'].apply(format_number)
+        top_5['units_ordered'] = top_5['units_ordered'].apply(format_number)
         top_5.columns = ['Distributor', 'Order Value', 'Cases', 'Status']
         st.dataframe(top_5, hide_index=True, use_container_width=True)
 
     with col2:
         st.subheader("⚠️ High Depletion, Low Orders")
-        concern = flow_df[(flow_df['cases_depleted'] > 500) & (flow_df['flow_ratio'].fillna(0) < 0.5)].nsmallest(5, 'flow_ratio')[['parent_name', 'cases_depleted', 'cases_ordered', 'flow_status']].copy()
+        concern = flow_df[(flow_df['units_depleted'] > 500) & (flow_df['flow_ratio'].fillna(0) < 0.5)].nsmallest(5, 'flow_ratio')[['parent_name', 'units_depleted', 'units_ordered', 'flow_status']].copy()
         if not concern.empty:
-            concern['cases_depleted'] = concern['cases_depleted'].apply(format_number)
-            concern['cases_ordered'] = concern['cases_ordered'].apply(format_number)
+            concern['units_depleted'] = concern['units_depleted'].apply(format_number)
+            concern['units_ordered'] = concern['units_ordered'].apply(format_number)
             concern.columns = ['Distributor', 'Depleted', 'Ordered', 'Status']
             st.dataframe(concern, hide_index=True, use_container_width=True)
         else:
@@ -245,16 +245,16 @@ with tab2:
         filtered_df = filtered_df[filtered_df['has_sf_orders']]
 
     # Scatter
-    scatter_df = filtered_df[(filtered_df['cases_ordered'] > 0) | (filtered_df['cases_depleted'] > 0)].copy()
+    scatter_df = filtered_df[(filtered_df['units_ordered'] > 0) | (filtered_df['units_depleted'] > 0)].copy()
     if not scatter_df.empty:
-        fig = px.scatter(scatter_df, x='cases_depleted', y='cases_ordered', size='order_value',
+        fig = px.scatter(scatter_df, x='units_depleted', y='units_ordered', size='order_value',
                          color='flow_status', hover_name='parent_name',
                          color_discrete_map={'Building Fast': '#2E86AB', 'Building': '#7FB069',
                                              'Balanced': '#F4D35E', 'Depleting': '#EE964B',
                                              'Depleting Fast': '#E94F37', 'VIP Only (No Orders)': '#95A5A6',
                                              'SF Only (No VIP)': '#BDC3C7'},
-                         labels={'cases_depleted': 'Cases Depleted', 'cases_ordered': 'Cases Ordered'})
-        max_val = max(scatter_df['cases_ordered'].max(), scatter_df['cases_depleted'].max())
+                         labels={'units_depleted': 'Units Depleted', 'units_ordered': 'Units Ordered'})
+        max_val = max(scatter_df['units_ordered'].max(), scatter_df['units_depleted'].max())
         fig.add_trace(go.Scatter(x=[0, max_val], y=[0, max_val], mode='lines',
                                  line=dict(color='gray', dash='dash'), name='1:1 Ratio'))
         fig.update_layout(height=450, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
@@ -262,13 +262,13 @@ with tab2:
         st.plotly_chart(fig, use_container_width=True)
 
     # Table
-    display_df = filtered_df[['parent_name', 'order_value', 'cases_ordered', 'cases_depleted',
+    display_df = filtered_df[['parent_name', 'order_value', 'units_ordered', 'units_depleted',
                               'flow_ratio', 'stores_reached', 'order_count', 'flow_status']].copy()
-    display_df.columns = ['Distributor', 'Order Value', 'Cases Ordered', 'Cases Depleted',
+    display_df.columns = ['Distributor', 'Order Value', 'Units Ordered', 'Units Depleted',
                           'Flow Ratio', 'Stores', 'Orders', 'Status']
     display_df['Order Value'] = display_df['Order Value'].apply(format_currency)
-    display_df['Cases Ordered'] = display_df['Cases Ordered'].apply(format_number)
-    display_df['Cases Depleted'] = display_df['Cases Depleted'].apply(format_number)
+    display_df['Units Ordered'] = display_df['Units Ordered'].apply(format_number)
+    display_df['Units Depleted'] = display_df['Units Depleted'].apply(format_number)
     display_df['Flow Ratio'] = display_df['Flow Ratio'].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "-")
     display_df['Stores'] = display_df['Stores'].apply(format_number)
     st.dataframe(display_df, hide_index=True, use_container_width=True, height=400)
