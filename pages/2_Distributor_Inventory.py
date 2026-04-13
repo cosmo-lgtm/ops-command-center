@@ -920,7 +920,7 @@ def main():
     """, unsafe_allow_html=True)
 
     # Filter Section - selectors first, then data load uses their values
-    col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+    col1, col2, col_uom, col3, col4 = st.columns([3, 1, 1, 1, 1])
 
     with col2:
         lookback_days = st.selectbox(
@@ -929,6 +929,17 @@ def main():
             index=2,
             format_func=lambda x: f"{x} days"
         )
+
+    with col_uom:
+        unit_mode = st.selectbox(
+            "Unit of Measure",
+            options=['Units', 'Cases'],
+            index=0,
+            help="Units = individual bottles/cans/shots. Cases = distributor selling units."
+        )
+
+    # Per-family case divisors for converting individual units → cases
+    FAMILY_CASE_SIZE = {'Cans': 24, 'Bottles': 6, 'Shots': 36, 'Other': 6}
 
     with col3:
         understock_threshold = st.selectbox(
@@ -975,6 +986,19 @@ def main():
     else:
         filtered_df = inventory_df.copy()
 
+    # Unit display helpers
+    uom_label = 'Cases' if unit_mode == 'Cases' else 'Units'
+    # Weighted avg pack size from the product family mix for aggregate conversion
+    if not family_trend_df.empty and unit_mode == 'Cases':
+        _fam_totals = family_trend_df.groupby('product_family')['qty_depleted'].sum()
+        _weighted = sum(_fam_totals.get(f, 0) / FAMILY_CASE_SIZE.get(f, 6) for f in _fam_totals.index)
+        avg_case_divisor = _fam_totals.sum() / _weighted if _weighted > 0 else 6
+    else:
+        avg_case_divisor = 1
+    def to_display_units(val):
+        """Convert individual units to display units (cases or units) based on toggle."""
+        return val / avg_case_divisor if unit_mode == 'Cases' else val
+
     # Calculate summary stats
     total_distributors = len(filtered_df)
     total_order_value = filtered_df['total_order_value'].sum()
@@ -1016,14 +1040,14 @@ def main():
 
     with col3:
         st.markdown(render_metric_card(
-            f"{total_qty_ordered:,.0f}",
-            f"Units Ordered ({lookback_days}d)"
+            f"{to_display_units(total_qty_ordered):,.0f}",
+            f"{uom_label} Ordered ({lookback_days}d)"
         ), unsafe_allow_html=True)
 
     with col4:
         st.markdown(render_metric_card(
-            f"{total_qty_depleted:,.0f}",
-            f"Units Depleted ({lookback_days}d)"
+            f"{to_display_units(total_qty_depleted):,.0f}",
+            f"{uom_label} Depleted ({lookback_days}d)"
         ), unsafe_allow_html=True)
 
     # KPI Cards Row 2: Inventory Health
@@ -1068,23 +1092,24 @@ def main():
     col1, col2 = st.columns([2, 1])
 
     with col1:
-        st.markdown('<p class="section-header">Units Ordered vs Depleted</p>', unsafe_allow_html=True)
+        st.markdown(f'<p class="section-header">{uom_label} Ordered vs Depleted</p>', unsafe_allow_html=True)
 
         if not trend_df.empty:
-            trend_sorted = trend_df.sort_values('week_start')
+            trend_sorted = trend_df.sort_values('week_start').copy()
 
-            # Calculate 4-week moving averages (both in units)
-            trend_sorted['orders_ma'] = trend_sorted['qty_ordered'].rolling(window=4, min_periods=2).mean()
-            trend_sorted['depletion_ma'] = trend_sorted['qty_depleted'].rolling(window=4, min_periods=2).mean()
+            # Apply unit conversion for display
+            trend_sorted['qty_ordered_display'] = trend_sorted['qty_ordered'].apply(to_display_units)
+            trend_sorted['qty_depleted_display'] = trend_sorted['qty_depleted'].apply(to_display_units)
+            trend_sorted['orders_ma'] = trend_sorted['qty_ordered_display'].rolling(window=4, min_periods=2).mean()
+            trend_sorted['depletion_ma'] = trend_sorted['qty_depleted_display'].rolling(window=4, min_periods=2).mean()
 
             fig = go.Figure()
 
-            # Raw data lines - both in units
             fig.add_trace(go.Scatter(
                 x=trend_sorted['week_start'],
-                y=trend_sorted['qty_ordered'],
+                y=trend_sorted['qty_ordered_display'],
                 mode='lines+markers',
-                name='Units Ordered (SF)',
+                name=f'{uom_label} Ordered (SF)',
                 line=dict(color=COLORS['primary'], width=2),
                 marker=dict(size=6),
                 opacity=0.7
@@ -1092,15 +1117,14 @@ def main():
 
             fig.add_trace(go.Scatter(
                 x=trend_sorted['week_start'],
-                y=trend_sorted['qty_depleted'],
+                y=trend_sorted['qty_depleted_display'],
                 mode='lines+markers',
-                name='Units Depleted (VIP)',
+                name=f'{uom_label} Depleted (VIP)',
                 line=dict(color=COLORS['secondary'], width=2),
                 marker=dict(size=6),
                 opacity=0.7
             ))
 
-            # Moving average lines (dashed for distinction)
             fig.add_trace(go.Scatter(
                 x=trend_sorted['week_start'],
                 y=trend_sorted['orders_ma'],
@@ -1120,7 +1144,7 @@ def main():
             apply_dark_theme(fig, height=350,
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#2D2926')),
                 hovermode='x unified',
-                yaxis=dict(title=dict(text='Units', font=dict(color='#2D2926')), tickfont=dict(color='#625f56'), tickformat=',.0f')
+                yaxis=dict(title=dict(text=uom_label, font=dict(color='#2D2926')), tickfont=dict(color='#625f56'), tickformat=',.0f')
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
@@ -1212,30 +1236,34 @@ def main():
             for family in ['Cans', 'Bottles', 'Shots', 'Other']:
                 fam_data = family_trend_df[family_trend_df['product_family'] == family].sort_values('week_start')
                 if not fam_data.empty:
+                    fam_divisor = FAMILY_CASE_SIZE.get(family, 6) if unit_mode == 'Cases' else 1
+                    display_qty = fam_data['qty_depleted'] / fam_divisor
                     fig_fam.add_trace(go.Scatter(
                         x=fam_data['week_start'],
-                        y=fam_data['qty_depleted'],
+                        y=display_qty,
                         mode='lines',
                         name=family,
                         stackgroup='one',
                         line=dict(width=0.5, color=family_colors.get(family, '#8892b0')),
-                        hovertemplate=f'{family}: %{{y:,.0f}} units<extra></extra>'
+                        hovertemplate=f'{family}: %{{y:,.0f}} {uom_label.lower()}<extra></extra>'
                     ))
             apply_dark_theme(fig_fam, height=300,
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#2D2926')),
                 hovermode='x unified',
-                yaxis=dict(title=dict(text='Units Depleted'), tickformat=',.0f')
+                yaxis=dict(title=dict(text=f'{uom_label} Depleted'), tickformat=',.0f')
             )
             st.plotly_chart(fig_fam, use_container_width=True)
 
         with fam_col2:
-            # Period totals by family
+            # Period totals by family (with per-family case conversion)
             family_totals = family_trend_df.groupby('product_family')['qty_depleted'].sum().sort_values(ascending=False)
             grand_total = family_totals.sum()
             for family, total in family_totals.items():
+                fam_divisor = FAMILY_CASE_SIZE.get(family, 6) if unit_mode == 'Cases' else 1
+                display_total = total / fam_divisor
                 pct = round(100 * total / grand_total, 1) if grand_total > 0 else 0
                 st.markdown(render_metric_card(
-                    f"{total:,.0f}",
+                    f"{display_total:,.0f}",
                     f"{family} ({pct}%)"
                 ), unsafe_allow_html=True)
 
