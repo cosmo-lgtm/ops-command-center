@@ -924,11 +924,11 @@ def main():
     col1, col2, col_uom, col3, col4 = st.columns([3, 1, 1, 1, 1])
 
     with col2:
-        lookback_days = st.selectbox(
-            "Lookback Period",
-            options=[30, 60, 90, 180],
-            index=2,
-            format_func=lambda x: f"{x} days"
+        period_options = ['MTD', 'QTD', 'YTD', '30d', '60d', '90d', '180d']
+        selected_period = st.selectbox(
+            "Period",
+            options=period_options,
+            index=5,  # default 90d
         )
 
     with col_uom:
@@ -958,11 +958,26 @@ def main():
             format_func=lambda x: f"{x} weeks"
         )
 
-    # Load data with selected lookback period
+    # Compute date range from period selection
+    today = datetime.now().date()
+    if selected_period == 'MTD':
+        start_date = today.replace(day=1)
+    elif selected_period == 'QTD':
+        quarter_month = ((today.month - 1) // 3) * 3 + 1
+        start_date = today.replace(month=quarter_month, day=1)
+    elif selected_period == 'YTD':
+        start_date = today.replace(month=1, day=1)
+    else:
+        lookback_num = int(selected_period.replace('d', ''))
+        start_date = today - timedelta(days=lookback_num)
+    lookback_days = (today - start_date).days
+    period_label = selected_period
+
+    # Load data with selected period
     try:
         distributors_df = load_distributors()
         inventory_df = load_inventory_data(lookback_days=lookback_days)
-        lookback_weeks = lookback_days // 7
+        lookback_weeks = max(lookback_days // 7, 4)
         trend_df = load_trend_data(lookback_weeks=lookback_weeks)
         family_trend_df = load_trend_by_family(lookback_weeks=lookback_weeks)
         # Load distributor-level trends for stockout analysis
@@ -1036,19 +1051,19 @@ def main():
     with col2:
         st.markdown(render_metric_card(
             f"${total_order_value/1000000:.1f}M",
-            f"Order Value ({lookback_days}d)"
+            f"Order Value ({period_label})"
         ), unsafe_allow_html=True)
 
     with col3:
         st.markdown(render_metric_card(
             f"{to_display_units(total_qty_ordered):,.0f}",
-            f"{uom_label} Ordered ({lookback_days}d)"
+            f"{uom_label} Ordered ({period_label})"
         ), unsafe_allow_html=True)
 
     with col4:
         st.markdown(render_metric_card(
             f"{to_display_units(total_qty_depleted):,.0f}",
-            f"{uom_label} Depleted ({lookback_days}d)"
+            f"{uom_label} Depleted ({period_label})"
         ), unsafe_allow_html=True)
 
     # KPI Cards Row 2: Inventory Health
@@ -1962,7 +1977,7 @@ def main():
     st.markdown(f"""
     <div style="text-align: center; color: #625f56; margin-top: 48px; padding: 24px; border-top: 1px solid rgba(45,41,38,0.1);">
         <p style="margin: 0;">Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} UTC</p>
-        <p style="margin: 4px 0 0 0; font-size: 12px;">Data refreshes every 5 minutes | Lookback: {lookback_days} days</p>
+        <p style="margin: 4px 0 0 0; font-size: 12px;">Data refreshes every 5 minutes | Period: {period_label} ({lookback_days} days)</p>
     </div>
     """, unsafe_allow_html=True)
 
