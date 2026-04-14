@@ -138,14 +138,14 @@ def format_pct(n):
 
 
 def render_metric(label, value, sublabel="", color="purple"):
-    color_class = {
-        "purple": "metric-value", "green": "metric-value-green",
-        "gold": "metric-value-gold", "red": "metric-value-red",
-    }.get(color, "metric-value")
+    variant = {
+        "purple": "", "green": " metric-value-green",
+        "gold": " metric-value-gold", "red": " metric-value-red",
+    }.get(color, "")
     sub_html = f'<div class="metric-sublabel">{sublabel}</div>' if sublabel else ""
     st.markdown(f"""
     <div class="metric-card">
-        <div class="{color_class}">{value}</div>
+        <div class="metric-value{variant}">{value}</div>
         <div class="metric-label">{label}</div>
         {sub_html}
     </div>
@@ -469,10 +469,14 @@ with tab0:
     sales_through = data_through.get('vip_sales_through')
     fs_str = pd.to_datetime(fs_through).strftime('%b %d, %Y') if fs_through else '—'
     sales_str = pd.to_datetime(sales_through).strftime('%b %d, %Y') if sales_through else '—'
-    st.caption(
-        f"Depletions / doors / velocity data through **{fs_str}** "
-        f"(VIP retail fact sheet). SKU-level data through **{sales_str}** "
-        f"(VIP monthly sales)."
+    st.markdown(
+        f"<div style='font-family:Jost,sans-serif;font-size:0.78rem;"
+        f"text-transform:uppercase;letter-spacing:0.12em;color:#000;"
+        f"font-weight:600;margin:4px 0 18px 0;'>"
+        f"Depletions · Doors · Velocity through <span style='font-weight:700'>{fs_str}</span> "
+        f"&nbsp;·&nbsp; SKU-level through <span style='font-weight:700'>{sales_str}</span>"
+        f"</div>",
+        unsafe_allow_html=True,
     )
 
     # Inline chain filter for scorecard
