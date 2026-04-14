@@ -273,18 +273,32 @@ def compute_scorecard_kpis(doors, skus, chain_filter="All Chains"):
         active_current = len(doors[doors['qty_last_90_days'] > 0])
         active_prior = len(doors[doors['qty_previous_90_days'] > 0])
 
-        # 3. SKUs per Account — need SKU-level data for distinct item counts
+        # 3. SKUs per Account — count SKUs per door using the same fixed monthly
+        # windows already validated for depletions. ttm_current / ttm_prior on
+        # chain_sales_report_2026 are unreliable (ttm_prior is 0/NULL), so sum
+        # the monthly columns directly. Current = nov_25+dec_25+jan_26,
+        # Prior = aug_25+sep_25+oct_25.
         if len(skus) > 0:
-            # Use ttm_current/ttm_prior from chain_sales_report as proxy
+            current_units = (
+                skus['nov_25'].fillna(0)
+                + skus['dec_25'].fillna(0)
+                + skus['jan_26'].fillna(0)
+            )
+            prior_units = (
+                skus['aug_25'].fillna(0)
+                + skus['sep_25'].fillna(0)
+                + skus['oct_25'].fillna(0)
+            )
+            current_mask = current_units > 0
+            prior_mask = prior_units > 0
+
             current_sku_per_door = (
-                skus[skus['ttm_current'] > 0]
-                .groupby('vip_id')['item_code'].nunique()
+                skus[current_mask].groupby('vip_id')['item_code'].nunique()
             )
             skus_per_acct = current_sku_per_door.mean() if len(current_sku_per_door) > 0 else 0
 
             prior_sku_per_door = (
-                skus[skus['ttm_prior'] > 0]
-                .groupby('vip_id')['item_code'].nunique()
+                skus[prior_mask].groupby('vip_id')['item_code'].nunique()
             )
             skus_per_acct_prior = prior_sku_per_door.mean() if len(prior_sku_per_door) > 0 else 0
         else:
