@@ -83,8 +83,8 @@ def load_b2b_weekly_revenue() -> pd.DataFrame:
     return run_query("""
     SELECT
         DATE_TRUNC(order_date, WEEK(MONDAY)) as week_start,
-        ROUND(SUM(CAST(line_total_price AS FLOAT64)), 2) as revenue
-    FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened`
+        ROUND(SUM(line_total_price), 2) as revenue
+    FROM `artful-logic-475116-p1.analytics.v_b2b_orders_universe`
     WHERE order_status != 'Draft'
         AND order_date >= '2026-01-01'
         AND order_date <= '2026-03-31'
@@ -98,13 +98,13 @@ def load_b2c_weekly_revenue() -> pd.DataFrame:
     """Weekly DTC (B2C) net revenue from Shopify orders."""
     return run_query("""
     SELECT
-        DATE_TRUNC(DATE(created_at), WEEK(MONDAY)) as week_start,
-        ROUND(SUM(CAST(current_subtotal_price AS FLOAT64)), 2) as revenue
-    FROM `artful-logic-475116-p1.raw_shopify.orders`
-    WHERE cancelled_at IS NULL
+        DATE_TRUNC(order_date, WEEK(MONDAY)) as week_start,
+        ROUND(SUM(subtotal), 2) as revenue
+    FROM `artful-logic-475116-p1.analytics.v_d2c_orders_universe`
+    WHERE channel = 'shopify'
         AND financial_status IN ('paid', 'partially_refunded')
-        AND DATE(created_at) >= '2026-01-01'
-        AND DATE(created_at) <= '2026-03-31'
+        AND order_date >= '2026-01-01'
+        AND order_date <= '2026-03-31'
     GROUP BY week_start
     ORDER BY week_start
     """)
@@ -115,7 +115,7 @@ def load_active_door_count() -> int:
     """Current active door count from VIP retail fact sheet (ordered within 30 days)."""
     df = run_query("""
     SELECT COUNT(DISTINCT vip_id) as active_doors
-    FROM `artful-logic-475116-p1.staging_vip.retail_customer_fact_sheet_2026`
+    FROM `artful-logic-475116-p1.analytics.v_door_universe`
     WHERE days_since_last_order <= 90
     """)
     return int(df['active_doors'].iloc[0]) if not df.empty else 0

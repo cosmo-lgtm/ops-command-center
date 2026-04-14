@@ -68,7 +68,7 @@ def load_distributors():
         d.distributor_name,
         d.sf_account_id,
         CAST(d.total_retailers AS INT64) as total_retailers
-    FROM `artful-logic-475116-p1.staging_vip.distributor_fact_sheet_2026` d
+    FROM `artful-logic-475116-p1.analytics.v_distributor_universe` d
     WHERE d.distributor_code IS NOT NULL
       AND NOT d.is_parent_rollup
     ORDER BY d.distributor_name
@@ -123,7 +123,7 @@ def load_inventory_data(lookback_days: int = 90):
             SUM(CAST(sfo.line_total_price AS FLOAT64)) as order_value,
             COUNT(DISTINCT sfo.order_id) as order_count,
             MAX(sfo.order_date) as last_order_date
-        FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
+        FROM `artful-logic-475116-p1.analytics.v_b2b_orders_universe` sfo
         LEFT JOIN sku_map sm ON sfo.sku = sm.sf_sku
         WHERE sfo.account_type IN ('Distributor', 'Distribution Center')
             AND sfo.order_status NOT IN ('Draft', 'Cancelled')
@@ -141,7 +141,7 @@ def load_inventory_data(lookback_days: int = 90):
     all_channel_revenue AS (
         SELECT
             SUM(CAST(sfo.line_total_price AS FLOAT64)) as total_revenue
-        FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
+        FROM `artful-logic-475116-p1.analytics.v_b2b_orders_universe` sfo
         WHERE sfo.order_status != 'Draft'
             AND sfo.order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
             AND sfo.order_date <= CURRENT_DATE()
@@ -185,7 +185,7 @@ def load_inventory_data(lookback_days: int = 90):
             v.sf_account_id as sf_child_id,
             v.parent_sf_account_id as sf_parent_id,
             CAST(v.total_retailers AS INT64) as total_retailers
-        FROM `artful-logic-475116-p1.staging_vip.distributor_fact_sheet_2026` v
+        FROM `artful-logic-475116-p1.analytics.v_distributor_universe` v
         WHERE NOT v.is_parent_rollup
     ),
 
@@ -349,7 +349,7 @@ def load_product_level_data(distributor_codes: list = None, lookback_days: int =
             ELSE 'Low Velocity'
         END as velocity_status
     FROM `artful-logic-475116-p1.raw_vip.sales_lite` sl
-    JOIN `artful-logic-475116-p1.staging_vip.distributor_fact_sheet_2026` d
+    JOIN `artful-logic-475116-p1.analytics.v_distributor_universe` d
         ON sl.Dist_Code = d.distributor_code
     LEFT JOIN items_deduped i
         ON sl.Item_Code = i.item_code
@@ -437,7 +437,7 @@ def load_trend_data(lookback_weeks: int = 12):
             SUM(CAST(sfo.quantity AS INT64) * COALESCE(sm.pack_size, 1)) as qty_ordered,
             SUM(CAST(sfo.line_total_price AS FLOAT64)) as order_value,
             COUNT(DISTINCT sfo.order_id) as order_count
-        FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
+        FROM `artful-logic-475116-p1.analytics.v_b2b_orders_universe` sfo
         LEFT JOIN sku_map sm ON sfo.sku = sm.sf_sku
         WHERE sfo.account_type IN ('Distributor', 'Distribution Center')
             AND sfo.order_status NOT IN ('Draft', 'Cancelled')
@@ -552,7 +552,7 @@ def load_distributor_weekly_trends(lookback_weeks: int = 12):
             COUNT(DISTINCT sl.Acct_Code) as stores_reached,
             COUNT(DISTINCT sl.Item_Code) as skus_sold
         FROM `artful-logic-475116-p1.raw_vip.sales_lite` sl
-        JOIN `artful-logic-475116-p1.staging_vip.distributor_fact_sheet_2026` d
+        JOIN `artful-logic-475116-p1.analytics.v_distributor_universe` d
             ON sl.Dist_Code = d.distributor_code
             AND NOT d.is_parent_rollup
         LEFT JOIN vip_item_units iu ON sl.Item_Code = iu.item_code
@@ -616,7 +616,7 @@ def load_woi_by_sku(distributor_ids: list = None):
         dc_count,
         last_order_date,
         last_depletion_date
-    FROM `artful-logic-475116-p1.staging_vip.woi_by_distro_sku`
+    FROM `artful-logic-475116-p1.analytics.v_inventory_universe`
     {distributor_filter}
     ORDER BY distributor_name, qty_depleted DESC
     """

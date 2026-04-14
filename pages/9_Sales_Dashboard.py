@@ -64,7 +64,7 @@ def load_b2b_daily(start_date: str, end_date: str):
         ROUND(SUM(CAST(sfo.line_total_price AS FLOAT64)), 2) as revenue,
         SUM(CAST(sfo.quantity AS FLOAT64) * COALESCE(sm.pack_size, 1)) as units,
         EXTRACT(DAYOFWEEK FROM sfo.order_date) as day_of_week
-    FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
+    FROM `artful-logic-475116-p1.analytics.v_b2b_orders_universe` sfo
     LEFT JOIN (SELECT DISTINCT sf_sku, pack_size FROM `artful-logic-475116-p1.staging_vip.sku_mapping`) sm ON sfo.sku = sm.sf_sku
     WHERE sfo.order_status NOT IN ('Draft', 'Cancelled')
         AND sfo.order_date >= '{start_date}'
@@ -88,7 +88,7 @@ def load_b2b_by_account(start_date: str, end_date: str):
         SUM(CAST(sfo.quantity AS FLOAT64) * COALESCE(sm.pack_size, 1)) as units,
         MAX(sfo.order_date) as last_order_date,
         MIN(sfo.order_date) as first_order_date
-    FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
+    FROM `artful-logic-475116-p1.analytics.v_b2b_orders_universe` sfo
     LEFT JOIN (SELECT DISTINCT sf_sku, pack_size FROM `artful-logic-475116-p1.staging_vip.sku_mapping`) sm ON sfo.sku = sm.sf_sku
     LEFT JOIN `artful-logic-475116-p1.raw_salesforce.Account` a ON sfo.account_id = a.Id
     LEFT JOIN `artful-logic-475116-p1.raw_salesforce.User` u ON a.OwnerId = u.Id
@@ -109,7 +109,7 @@ def load_b2b_weekly(start_date: str, end_date: str):
         COUNT(DISTINCT sfo.order_id) as order_count,
         ROUND(SUM(CAST(sfo.line_total_price AS FLOAT64)), 2) as revenue,
         SUM(CAST(sfo.quantity AS FLOAT64) * COALESCE(sm.pack_size, 1)) as units
-    FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
+    FROM `artful-logic-475116-p1.analytics.v_b2b_orders_universe` sfo
     LEFT JOIN (SELECT DISTINCT sf_sku, pack_size FROM `artful-logic-475116-p1.staging_vip.sku_mapping`) sm ON sfo.sku = sm.sf_sku
     WHERE sfo.order_status NOT IN ('Draft', 'Cancelled')
         AND order_date >= '{start_date}'
@@ -129,7 +129,7 @@ def load_b2c_daily(start_date: str, end_date: str, net_revenue: bool = False):
         COUNT(DISTINCT id) as order_count,
         ROUND(SUM(CAST({revenue_col} AS FLOAT64)), 2) as revenue,
         EXTRACT(DAYOFWEEK FROM created_at) as day_of_week
-    FROM `artful-logic-475116-p1.raw_shopify.orders`
+    FROM `artful-logic-475116-p1.raw_shopify.orders` /* TODO migrate to v_d2c_orders_universe once column parity confirmed */
     WHERE cancelled_at IS NULL
         AND financial_status IN ('paid', 'partially_refunded')
         AND DATE(created_at) >= '{start_date}'
@@ -148,7 +148,7 @@ def load_b2c_weekly(start_date: str, end_date: str, net_revenue: bool = False):
         DATE_TRUNC(DATE(created_at), WEEK(MONDAY)) as week_start,
         COUNT(DISTINCT id) as order_count,
         ROUND(SUM(CAST({revenue_col} AS FLOAT64)), 2) as revenue
-    FROM `artful-logic-475116-p1.raw_shopify.orders`
+    FROM `artful-logic-475116-p1.raw_shopify.orders` /* TODO migrate to v_d2c_orders_universe once column parity confirmed */
     WHERE cancelled_at IS NULL
         AND financial_status IN ('paid', 'partially_refunded')
         AND DATE(created_at) >= '{start_date}'
@@ -173,7 +173,7 @@ def load_b2c_products(start_date: str, end_date: str, net_revenue: bool = False)
                 CAST(JSON_VALUE(item, '$.quantity') AS INT64) as quantity,
                 CAST(JSON_VALUE(item, '$.price') AS FLOAT64) as unit_price,
                 COALESCE(SAFE_CAST(JSON_VALUE(item, '$.total_discount') AS FLOAT64), 0) as line_discount
-            FROM `artful-logic-475116-p1.raw_shopify.orders` o,
+            FROM `artful-logic-475116-p1.raw_shopify.orders` /* TODO migrate to v_d2c_orders_universe once column parity confirmed */ o,
             UNNEST(JSON_QUERY_ARRAY(o.line_items)) as item
             WHERE o.cancelled_at IS NULL
                 AND o.financial_status IN ('paid', 'partially_refunded')
@@ -205,7 +205,7 @@ def load_b2c_products(start_date: str, end_date: str, net_revenue: bool = False)
                 JSON_VALUE(item, '$.sku') as sku,
                 CAST(JSON_VALUE(item, '$.quantity') AS INT64) as quantity,
                 CAST(JSON_VALUE(item, '$.price') AS FLOAT64) as unit_price
-            FROM `artful-logic-475116-p1.raw_shopify.orders` o,
+            FROM `artful-logic-475116-p1.raw_shopify.orders` /* TODO migrate to v_d2c_orders_universe once column parity confirmed */ o,
             UNNEST(JSON_QUERY_ARRAY(o.line_items)) as item
             WHERE o.cancelled_at IS NULL
                 AND o.financial_status IN ('paid', 'partially_refunded')
@@ -238,7 +238,7 @@ def load_b2b_by_state(start_date: str, end_date: str):
         COUNT(DISTINCT sfo.order_id) as order_count,
         ROUND(SUM(CAST(sfo.line_total_price AS FLOAT64)), 2) as revenue,
         SUM(CAST(sfo.quantity AS FLOAT64) * COALESCE(sm.pack_size, 1)) as units
-    FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
+    FROM `artful-logic-475116-p1.analytics.v_b2b_orders_universe` sfo
     LEFT JOIN (SELECT DISTINCT sf_sku, pack_size FROM `artful-logic-475116-p1.staging_vip.sku_mapping`) sm ON sfo.sku = sm.sf_sku
     LEFT JOIN `artful-logic-475116-p1.raw_salesforce.Account` a ON sfo.account_id = a.Id
     WHERE sfo.order_status NOT IN ('Draft', 'Cancelled')
@@ -260,7 +260,7 @@ def load_b2c_by_state(start_date: str, end_date: str, net_revenue: bool = False)
         UPPER(TRIM(JSON_VALUE(shipping_address, '$.province_code'))) as state,
         COUNT(DISTINCT id) as order_count,
         ROUND(SUM(CAST({revenue_col} AS FLOAT64)), 2) as revenue
-    FROM `artful-logic-475116-p1.raw_shopify.orders`
+    FROM `artful-logic-475116-p1.raw_shopify.orders` /* TODO migrate to v_d2c_orders_universe once column parity confirmed */
     WHERE cancelled_at IS NULL
         AND financial_status IN ('paid', 'partially_refunded')
         AND DATE(created_at) >= '{start_date}'
@@ -278,7 +278,7 @@ def load_filter_options():
     """Load distinct values for filters."""
     owners = run_query("""
     SELECT DISTINCT u.Name as owner_name
-    FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
+    FROM `artful-logic-475116-p1.analytics.v_b2b_orders_universe` sfo
     LEFT JOIN `artful-logic-475116-p1.raw_salesforce.Account` a ON sfo.account_id = a.Id
     LEFT JOIN `artful-logic-475116-p1.raw_salesforce.User` u ON a.OwnerId = u.Id
     WHERE sfo.order_status NOT IN ('Draft', 'Cancelled')
@@ -288,7 +288,7 @@ def load_filter_options():
 
     account_types = run_query("""
     SELECT DISTINCT account_type
-    FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened`
+    FROM `artful-logic-475116-p1.analytics.v_b2b_orders_universe`
     WHERE order_status NOT IN ('Draft', 'Cancelled')
         AND account_type IS NOT NULL
     ORDER BY account_type
@@ -395,7 +395,7 @@ def load_b2b_sku_daily(start_date: str, end_date: str):
         SUM(CAST(sfo.quantity AS FLOAT64) * COALESCE(sm.pack_size, 1)) as units,
         ROUND(SUM(CAST(sfo.line_total_price AS FLOAT64)), 2) as revenue,
         COUNT(DISTINCT sfo.order_id) as order_count
-    FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
+    FROM `artful-logic-475116-p1.analytics.v_b2b_orders_universe` sfo
     LEFT JOIN (SELECT DISTINCT sf_sku, pack_size FROM `artful-logic-475116-p1.staging_vip.sku_mapping`) sm ON sfo.sku = sm.sf_sku
     WHERE sfo.order_status NOT IN ('Draft', 'Cancelled')
         AND sfo.order_date >= '{start_date}'
@@ -417,7 +417,7 @@ def load_b2b_sku_weekly(start_date: str, end_date: str):
         SUM(CAST(sfo.quantity AS FLOAT64) * COALESCE(sm.pack_size, 1)) as units,
         ROUND(SUM(CAST(sfo.line_total_price AS FLOAT64)), 2) as revenue,
         COUNT(DISTINCT sfo.order_id) as order_count
-    FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
+    FROM `artful-logic-475116-p1.analytics.v_b2b_orders_universe` sfo
     LEFT JOIN (SELECT DISTINCT sf_sku, pack_size FROM `artful-logic-475116-p1.staging_vip.sku_mapping`) sm ON sfo.sku = sm.sf_sku
     WHERE sfo.order_status NOT IN ('Draft', 'Cancelled')
         AND order_date >= '{start_date}'
@@ -442,7 +442,7 @@ def load_b2c_sku_daily(start_date: str, end_date: str, net_revenue: bool = False
             CAST(JSON_VALUE(item, '$.price') AS FLOAT64) as unit_price,
             {discount_col} as line_discount,
             o.id as order_id
-        FROM `artful-logic-475116-p1.raw_shopify.orders` o,
+        FROM `artful-logic-475116-p1.raw_shopify.orders` /* TODO migrate to v_d2c_orders_universe once column parity confirmed */ o,
         UNNEST(JSON_QUERY_ARRAY(o.line_items)) as item
         WHERE o.cancelled_at IS NULL
             AND o.financial_status IN ('paid', 'partially_refunded')
@@ -480,7 +480,7 @@ def load_b2c_sku_weekly(start_date: str, end_date: str, net_revenue: bool = Fals
             CAST(JSON_VALUE(item, '$.price') AS FLOAT64) as unit_price,
             {discount_col} as line_discount,
             o.id as order_id
-        FROM `artful-logic-475116-p1.raw_shopify.orders` o,
+        FROM `artful-logic-475116-p1.raw_shopify.orders` /* TODO migrate to v_d2c_orders_universe once column parity confirmed */ o,
         UNNEST(JSON_QUERY_ARRAY(o.line_items)) as item
         WHERE o.cancelled_at IS NULL
             AND o.financial_status IN ('paid', 'partially_refunded')

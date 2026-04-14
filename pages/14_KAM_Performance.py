@@ -58,7 +58,7 @@ def load_door_data():
         trend_30d, customer_status,
         sf_account_id, sf_account_name, sf_owner_name,
         google_latitude, google_longitude
-    FROM `staging_vip.retail_customer_fact_sheet_2026`
+    FROM `analytics.v_door_universe`
     WHERE chain_code IS NOT NULL AND chain_code != ''
     """
     return client.query(query).to_dataframe()
@@ -104,7 +104,7 @@ def load_data_through_dates():
     query = """
     SELECT
       (SELECT MAX(most_recent_order_date)
-         FROM `staging_vip.retail_customer_fact_sheet_2026`
+         FROM `analytics.v_door_universe`
          WHERE most_recent_order_date IS NOT NULL) AS fact_sheet_through,
       (SELECT MAX(transaction_date)
          FROM `analytics.vip_sales_2026`
@@ -120,7 +120,7 @@ def load_data_through_dates():
 @st.cache_data(ttl=300)
 def load_chain_data():
     client = get_bq_client()
-    return client.query("SELECT * FROM `staging_vip.chain_hq_fact_sheet_2026`").to_dataframe()
+    return client.query("SELECT * FROM `analytics.v_chain_universe`").to_dataframe()
 
 
 @st.cache_data(ttl=300)
@@ -133,7 +133,7 @@ def load_sku_data():
         feb_25, mar_25, apr_25, may_25, jun_25, jul_25,
         aug_25, sep_25, oct_25, nov_25, dec_25, jan_26,
         ttm_current, ttm_prior, total_units_all_time
-    FROM `staging_vip.chain_sales_report_2026`
+    FROM `analytics.v_chain_sku_sales_wide`
     """
     return client.query(query).to_dataframe()
 
