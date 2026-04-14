@@ -166,75 +166,82 @@ GRADIENT_COLORS = ['#667eea', '#764ba2', '#f093fb', '#f5576c', '#ffd700', '#64ff
 SCORECARD_CSS = """
 <style>
 .scorecard-wrap {
-    font-family: 'Jost', sans-serif;
-    background: #fef6ee;
-    border-radius: 18px;
-    padding: 32px 36px 24px 36px;
-    border: 1.5px solid #e8ddd0;
-    margin-bottom: 24px;
+    font-family: 'Jost', 'Helvetica', sans-serif;
+    background: #ffffff;
+    border-radius: 24px;
+    padding: 28px 32px 20px 32px;
+    border: 1px solid rgba(45, 41, 38, 0.06);
+    box-shadow: 0 1px 2px rgba(45,41,38,0.04), 0 8px 24px rgba(45,41,38,0.06);
+    margin-bottom: 16px;
 }
 .scorecard-title {
-    font-family: 'Jost', sans-serif;
+    font-family: 'Jost', 'Helvetica', sans-serif;
     font-weight: 700;
-    font-size: 1.6rem;
-    color: #2D2926;
-    margin-bottom: 4px;
+    font-size: 1.35rem;
+    color: #000000;
+    letter-spacing: -0.01em;
+    margin: 0 0 18px 0;
 }
 .scorecard-title em {
+    font-family: 'Cormorant Garamond', 'Jost', serif;
     font-style: italic;
     font-weight: 400;
 }
 .scorecard-table {
     width: 100%;
     border-collapse: collapse;
-    font-family: 'Jost', sans-serif;
-    font-size: 0.92rem;
+    font-family: 'Jost', 'Helvetica', sans-serif;
 }
 .scorecard-table thead th {
-    background: #3d3530;
-    color: #fff;
-    padding: 10px 14px;
-    text-align: center;
+    background: transparent;
+    color: #000000;
+    padding: 10px 14px 12px 14px;
+    text-align: right;
     font-weight: 600;
-    font-size: 0.85rem;
-    letter-spacing: 0.02em;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    border-bottom: 1.5px solid rgba(45, 41, 38, 0.15);
 }
-.scorecard-table thead th:first-child {
+.scorecard-table thead th:first-child,
+.scorecard-table thead th:nth-child(2) {
     text-align: left;
-    border-radius: 8px 0 0 0;
-}
-.scorecard-table thead th:last-child {
-    border-radius: 0 8px 0 0;
 }
 .scorecard-table tbody td {
-    padding: 10px 14px;
-    text-align: center;
-    border-bottom: 1px solid #e8ddd0;
-    color: #2D2926;
+    padding: 14px 14px;
+    text-align: right;
+    border-bottom: 1px solid rgba(45, 41, 38, 0.06);
+    color: #000000;
+    font-size: 0.95rem;
+    font-variant-numeric: tabular-nums;
+}
+.scorecard-table tbody tr:last-child td {
+    border-bottom: none;
 }
 .scorecard-table tbody td:first-child {
     text-align: left;
     font-weight: 600;
+    color: #000000;
 }
 .scorecard-table tbody td:nth-child(2) {
-    font-size: 0.82rem;
-    color: #7a6f63;
-    font-style: italic;
+    text-align: left;
+    font-size: 0.78rem;
+    color: #000000;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
 }
-.scorecard-table tbody tr:nth-child(even) {
-    background: #f7efe4;
+.scorecard-table tbody tr:hover td {
+    background: rgba(45, 41, 38, 0.025);
 }
-.scorecard-table tbody tr:nth-child(odd) {
-    background: #fef9f1;
-}
-.scorecard-table .sc-pos { color: #2e7d32; font-weight: 600; }
-.scorecard-table .sc-neg { color: #c62828; font-weight: 600; }
-.scorecard-table .sc-neutral { color: #7a6f63; }
+.scorecard-table .sc-pos { color: #1b5e20; font-weight: 600; }
+.scorecard-table .sc-neg { color: #b04d5e; font-weight: 600; }
+.scorecard-table .sc-neutral { color: #000000; font-weight: 500; }
 .scorecard-footer {
     text-align: right;
-    margin-top: 10px;
-    font-size: 1.2rem;
-    opacity: 0.6;
+    margin-top: 6px;
+    font-size: 1rem;
+    opacity: 0.4;
 }
 </style>
 """
@@ -374,10 +381,10 @@ def render_scorecard_html(kpis):
                 <tr>
                     <th>KPI</th>
                     <th>UoM</th>
-                    <th>Actuals (L90D)</th>
-                    <th>Prior Period</th>
-                    <th>Chg</th>
-                    <th>% Chg</th>
+                    <th>L90D</th>
+                    <th>Prior 90D</th>
+                    <th>Δ</th>
+                    <th>% Δ</th>
                 </tr>
             </thead>
             <tbody>{rows}

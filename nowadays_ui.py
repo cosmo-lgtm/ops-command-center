@@ -560,7 +560,7 @@ EDITORIAL_CSS = """
   text-transform: uppercase;
   letter-spacing: 0.1em;
   font-weight: 600;
-  color: var(--nw-on-surface-variant);
+  color: #000000;
 }
 .nw-legend-dot {
   width: 10px;
@@ -1269,7 +1269,7 @@ def editorial_plotly(fig, height: int = 350, **kwargs):
     # overrides take precedence without raising "multiple values for
     # keyword argument" TypeErrors.
     legend_defaults = {
-        "font": {"color": "#2D2926", "family": "Jost, Helvetica, sans-serif"},
+        "font": {"color": "#000000", "family": "Jost, Helvetica, sans-serif"},
     }
     caller_legend = kwargs.pop("legend", None)
     if isinstance(caller_legend, dict):
