@@ -66,13 +66,25 @@ def _f(val):
     return float(val) if val is not None else 0.0
 
 
-def _platform_cols(platform):
-    """Return (revenue_col, orders_col, where_clause) for the selected platform."""
+def _platform_cols(platform, date_start=None, date_end=None):
+    """Return (revenue_col, orders_col, where_clause) for the selected platform + optional date range."""
+    conditions = []
     if platform == "WooCommerce":
-        return "woo_revenue", "woo_orders", "WHERE woo_orders > 0"
+        rev, ord_ = "woo_revenue", "woo_orders"
+        conditions.append("woo_orders > 0")
     elif platform == "Shopify":
-        return "shopify_revenue", "shopify_orders", "WHERE shopify_orders > 0"
-    return "lifetime_revenue", "lifetime_orders", ""
+        rev, ord_ = "shopify_revenue", "shopify_orders"
+        conditions.append("shopify_orders > 0")
+    else:
+        rev, ord_ = "lifetime_revenue", "lifetime_orders"
+
+    if date_start:
+        conditions.append(f"DATE(first_order_date) >= '{date_start}'")
+    if date_end:
+        conditions.append(f"DATE(first_order_date) <= '{date_end}'")
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    return rev, ord_, where
 
 
 def compute_mature_ltv(cohort_df, horizon_months, as_of_date):
@@ -211,8 +223,8 @@ def compute_cumulative_matrix(cohort_df, as_of_date):
 # --- Data Loaders ---
 
 @st.cache_data(ttl=600)
-def load_ltv_summary(platform="All"):
-    rev, ord_, where = _platform_cols(platform)
+def load_ltv_summary(platform="All", date_start=None, date_end=None):
+    rev, ord_, where = _platform_cols(platform, date_start, date_end)
     return _run_query(f"""
     SELECT
         COUNT(*) AS total_customers,
@@ -234,8 +246,8 @@ def load_ltv_summary(platform="All"):
 
 
 @st.cache_data(ttl=600)
-def load_ltv_distribution(platform="All"):
-    rev, _, where = _platform_cols(platform)
+def load_ltv_distribution(platform="All", date_start=None, date_end=None):
+    rev, _, where = _platform_cols(platform, date_start, date_end)
     return _run_query(f"""
     SELECT
         CASE
@@ -266,8 +278,16 @@ def load_ltv_distribution(platform="All"):
 
 
 @st.cache_data(ttl=600)
-def load_monthly_revenue():
-    return _run_query("""
+def load_monthly_revenue(date_start=None, date_end=None):
+    woo_date_filter = ""
+    shopify_date_filter = ""
+    if date_start:
+        woo_date_filter += f" AND DATE(date_created) >= '{date_start}'"
+        shopify_date_filter += f" AND DATE(created_at) >= '{date_start}'"
+    if date_end:
+        woo_date_filter += f" AND DATE(date_created) <= '{date_end}'"
+        shopify_date_filter += f" AND DATE(created_at) <= '{date_end}'"
+    return _run_query(f"""
     WITH woo AS (
         SELECT
             DATE_TRUNC(TIMESTAMP(date_created), MONTH) AS month,
@@ -275,7 +295,7 @@ def load_monthly_revenue():
             SUM(CAST(total AS NUMERIC)) AS revenue,
             'WooCommerce' AS platform
         FROM `artful-logic-475116-p1.raw_woocommerce.orders`
-        WHERE status IN ('completed', 'refunded')
+        WHERE status IN ('completed', 'refunded'){woo_date_filter}
         GROUP BY 1
     ),
     shopify AS (
@@ -286,7 +306,7 @@ def load_monthly_revenue():
             'Shopify' AS platform
         FROM `artful-logic-475116-p1.raw_shopify.orders`
         WHERE financial_status IN ('paid', 'partially_refunded', 'refunded')
-            AND cancelled_at IS NULL
+            AND cancelled_at IS NULL{shopify_date_filter}
         GROUP BY 1
     )
     SELECT * FROM woo
@@ -297,9 +317,14 @@ def load_monthly_revenue():
 
 
 @st.cache_data(ttl=600)
-def load_cohort_data(platform="All"):
+def load_cohort_data(platform="All", date_start=None, date_end=None):
+    cohort_filter = ""
+    if date_start:
+        cohort_filter += f" AND DATE(cohort_month) >= '{date_start}'"
+    if date_end:
+        cohort_filter += f" AND DATE(cohort_month) <= '{date_end}'"
     if platform == "All":
-        return _run_query("""
+        return _run_query(f"""
         SELECT
             FORMAT_TIMESTAMP('%Y-%m', cohort_month) AS cohort,
             months_since_first,
@@ -308,7 +333,7 @@ def load_cohort_data(platform="All"):
             revenue,
             revenue_per_customer
         FROM `artful-logic-475116-p1.marts.vw_d2c_cohort_analysis`
-        WHERE months_since_first <= 18
+        WHERE months_since_first <= 18{cohort_filter}
         ORDER BY cohort, months_since_first
         """)
 
@@ -368,15 +393,15 @@ def load_cohort_data(platform="All"):
       ROUND(SUM(total), 2) AS revenue,
       ROUND(SUM(total) / COUNT(DISTINCT email), 2) AS revenue_per_customer
     FROM order_with_cohort
-    WHERE months_since_first <= 18
+    WHERE months_since_first <= 18{cohort_filter}
     GROUP BY 1, 2
     ORDER BY 1, 2
     """)
 
 
 @st.cache_data(ttl=600)
-def load_repeat_rate_trend(platform="All"):
-    _, ord_, where = _platform_cols(platform)
+def load_repeat_rate_trend(platform="All", date_start=None, date_end=None):
+    _, ord_, where = _platform_cols(platform, date_start, date_end)
     return _run_query(f"""
     WITH customer_cohorts AS (
         SELECT
@@ -399,8 +424,8 @@ def load_repeat_rate_trend(platform="All"):
 
 
 @st.cache_data(ttl=600)
-def load_top_customers(platform="All"):
-    rev, ord_, where = _platform_cols(platform)
+def load_top_customers(platform="All", date_start=None, date_end=None):
+    rev, ord_, where = _platform_cols(platform, date_start, date_end)
     return _run_query(f"""
     SELECT
         email,
@@ -447,18 +472,32 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # --- Platform Filter ---
-    platform = st.radio(
-        "Platform",
-        ["Shopify", "All", "WooCommerce"],
-        horizontal=True,
-        label_visibility="collapsed",
-    )
+    # --- Filters ---
+    filter_cols = st.columns([2, 1, 1, 1])
+    with filter_cols[0]:
+        platform = st.radio(
+            "Platform",
+            ["Shopify", "All", "WooCommerce"],
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+    with filter_cols[1]:
+        date_start = st.date_input("From", value=None, min_value=date(2023, 1, 1), max_value=date.today(), key="ltv_date_start")
+    with filter_cols[2]:
+        date_end = st.date_input("To", value=None, min_value=date(2023, 1, 1), max_value=date.today(), key="ltv_date_end")
+    with filter_cols[3]:
+        if st.button("Clear dates", use_container_width=True):
+            st.session_state["ltv_date_start"] = None
+            st.session_state["ltv_date_end"] = None
+            st.rerun()
+
+    ds = str(date_start) if date_start else None
+    de = str(date_end) if date_end else None
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     try:
-        summary = load_ltv_summary(platform)
+        summary = load_ltv_summary(platform, ds, de)
     except Exception as e:
         st.error(f"Error loading data: {e}")
         return
@@ -481,7 +520,7 @@ def main():
     # Load cohort data once — feeds both the new mature-LTV KPI cards
     # and the Cohort Retention tab. Cached at the loader level.
     try:
-        cohort_df = load_cohort_data(platform)
+        cohort_df = load_cohort_data(platform, ds, de)
     except Exception as e:
         st.error(f"Error loading cohort data: {e}")
         cohort_df = pd.DataFrame()
@@ -548,7 +587,7 @@ def main():
         st.markdown('<p class="section-header">Monthly Revenue by Platform</p>', unsafe_allow_html=True)
 
         try:
-            monthly = load_monthly_revenue()
+            monthly = load_monthly_revenue(ds, de)
         except Exception as e:
             st.error(f"Error: {e}")
             monthly = pd.DataFrame()
@@ -608,7 +647,7 @@ def main():
         st.markdown('<p class="section-header">Customer LTV Distribution</p>', unsafe_allow_html=True)
 
         try:
-            dist = load_ltv_distribution(platform)
+            dist = load_ltv_distribution(platform, ds, de)
         except Exception as e:
             st.error(f"Error: {e}")
             dist = pd.DataFrame()
@@ -669,7 +708,7 @@ def main():
         # Repeat rate by acquisition cohort
         st.markdown('<p class="section-header">Repeat Rate by Acquisition Quarter</p>', unsafe_allow_html=True)
         try:
-            repeat_df = load_repeat_rate_trend(platform)
+            repeat_df = load_repeat_rate_trend(platform, ds, de)
         except Exception as e:
             st.error(f"Error: {e}")
             repeat_df = pd.DataFrame()
@@ -869,7 +908,7 @@ def main():
         st.markdown('<p class="section-header">Top 50 Customers by Lifetime Revenue</p>', unsafe_allow_html=True)
 
         try:
-            top_df = load_top_customers(platform)
+            top_df = load_top_customers(platform, ds, de)
         except Exception as e:
             st.error(f"Error: {e}")
             top_df = pd.DataFrame()
