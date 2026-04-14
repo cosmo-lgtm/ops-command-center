@@ -137,12 +137,11 @@ def load_inventory_data(lookback_days: int = 90):
     ),
 
     -- All-channel revenue (includes D2R, Key Accounts, etc.)
+    -- No sku_map join here — avoids row duplication from many-to-one SKU mappings
     all_channel_revenue AS (
         SELECT
-            SUM(CAST(sfo.line_total_price AS FLOAT64)) as total_revenue,
-            SUM(CAST(sfo.quantity AS INT64) * COALESCE(sm.pack_size, 1)) as total_units
+            SUM(CAST(sfo.line_total_price AS FLOAT64)) as total_revenue
         FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
-        LEFT JOIN sku_map sm ON sfo.sku = sm.sf_sku
         WHERE sfo.order_status != 'Draft'
             AND sfo.order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
             AND sfo.order_date <= CURRENT_DATE()
@@ -263,7 +262,6 @@ def load_inventory_data(lookback_days: int = 90):
         order_value as total_order_value,
         order_count as total_orders,
         acr.total_revenue as all_channel_revenue,
-        acr.total_units as all_channel_units,
         COALESCE(total_qty_depleted, 0) as total_qty_depleted,
         COALESCE(unique_stores, 0) as unique_stores,
         COALESCE(depletion_transactions, 0) as depletion_transactions,
@@ -1038,7 +1036,6 @@ def main():
     total_distributors = len(filtered_df)
     # All-channel revenue/units (includes D2R, Key Accounts — same as Field Sales dash)
     all_channel_rev = filtered_df['all_channel_revenue'].iloc[0] if not filtered_df.empty else 0
-    all_channel_units_total = filtered_df['all_channel_units'].iloc[0] if not filtered_df.empty else 0
     # Distributor-only metrics for inventory analysis
     total_order_value = filtered_df['total_order_value'].sum()
     total_qty_ordered = filtered_df['total_qty_ordered'].sum()
