@@ -13,6 +13,7 @@ import plotly.graph_objects as go
 import numpy as np
 
 from nowadays_ui import editorial_plotly, inject_editorial_style
+from kpi_guard import KpiCheck, validate_kpis
 
 # Page config
 st.set_page_config(
@@ -250,9 +251,21 @@ SCORECARD_CSS = """
 def compute_scorecard_kpis(doors, skus, chain_filter="All Chains"):
     """Compute all B2B scorecard KPIs with current vs prior period.
 
-    Uses rolling L90D windows from the door fact sheet (qty_last_90_days,
-    qty_previous_90_days) to stay current and match VIP industry standard.
-    SKU-level data used only for SKUs-per-account and reorder rate.
+    KPI symmetry contract (current ↔ prior must be derived from the SAME
+    raw source in the SAME query — never trust a precomputed prior
+    aggregate column, they ship broken):
+
+      Depletions         : fact_sheet.qty_last_90_days    ↔ fact_sheet.qty_previous_90_days
+      Accounts Buying    : fact_sheet.qty_last_90_days>0  ↔ fact_sheet.qty_previous_90_days>0
+      SKUs per Account   : SUM(nov_25+dec_25+jan_26)>0    ↔ SUM(aug_25+sep_25+oct_25)>0
+                             (on chain_sales_report_2026 monthly cols)
+      Velocity per Acct  : depl_current / active_current  ↔ depl_prior / active_prior
+      Off-Premise %      : active L90D ∩ off_prem         ↔ active P90D ∩ off_prem
+      Reorder Rate       : L30 ∩ P30                      ↔ P30 ∩ (P90-P30)
+
+    Known bad columns NOT to use: chain_sales_report_2026.ttm_prior (NULL),
+    retail_customer_fact_sheet_2026.qty_previous_90_days occasionally
+    understated (validate before trusting for chain-level splits).
     """
     if chain_filter != "All Chains":
         doors = doors[doors['chain_name'] == chain_filter].copy()
@@ -501,6 +514,14 @@ with tab0:
     # VIP's "cleansed outlet information" report. Chain selection uses chain-filtered doors.
     sc_doors = all_doors_df if sc_selected == "All Chains" else filtered_doors
     sc_kpis, ytd_val = compute_scorecard_kpis(sc_doors, filtered_sku, sc_selected)
+
+    # Guardrail: flag any KPI where current is populated but prior is 0/None
+    # (almost always means a precomputed 'prior' column is broken).
+    validate_kpis([
+        KpiCheck(name, current=actual, prior=prior,
+                 source="retail_customer_fact_sheet_2026 / chain_sales_report_2026 monthly cols")
+        for (name, _uom, actual, prior, _suffix, _fmt) in sc_kpis
+    ])
 
     # BANs — top 4 headline metrics
     b1, b2, b3, b4 = st.columns(4)

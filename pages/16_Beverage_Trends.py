@@ -32,6 +32,7 @@ from nowadays_ui import (
     render_section_header,
     type_badge,
 )
+from kpi_guard import KpiCheck, validate_kpis
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -613,6 +614,22 @@ def main() -> None:
     viral = load_viral(("brand", "ingredient", "flavor", "category"))
     trending_brands = load_trending(("brand",))
     declining = load_declining(("brand", "ingredient", "flavor", "category"))
+
+    # Guardrail: if any trending/declining row has recent_7d > 0 but
+    # prior_avg_7d == 0/NULL, the v_trending_28d / v_declining_28d views
+    # are broken — fail loud instead of silently rendering "+∞% growth".
+    prior_checks: list[KpiCheck] = []
+    for label, df in (("trending flavors", trending_flavors),
+                      ("trending brands", trending_brands),
+                      ("declining", declining)):
+        if df is not None and not df.empty and {"recent_7d", "prior_avg_7d"} <= set(df.columns):
+            prior_checks.append(KpiCheck(
+                name=f"{label} — prior_avg_7d column sum",
+                current=float(df["recent_7d"].fillna(0).sum()),
+                prior=float(df["prior_avg_7d"].fillna(0).sum()),
+                source=f"v_trending_28d / v_declining_28d ({label})",
+            ))
+    validate_kpis(prior_checks)
 
     col1, col2 = st.columns(2, gap="large")
     with col1:
