@@ -56,16 +56,17 @@ def run_query(query: str) -> pd.DataFrame:
 
 @st.cache_data(ttl=300)
 def load_b2b_daily(start_date: str, end_date: str):
-    """Load B2B (Salesforce) daily sales - all non-draft orders."""
+    """Load B2B (Salesforce) daily sales - all non-draft/cancelled orders."""
     return run_query(f"""
     SELECT
         sfo.order_date,
         COUNT(DISTINCT sfo.order_id) as order_count,
         ROUND(SUM(CAST(sfo.line_total_price AS FLOAT64)), 2) as revenue,
-        SUM(CAST(sfo.quantity AS FLOAT64)) as units,
+        SUM(CAST(sfo.quantity AS FLOAT64) * COALESCE(sm.pack_size, 1)) as units,
         EXTRACT(DAYOFWEEK FROM sfo.order_date) as day_of_week
     FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
-    WHERE sfo.order_status != 'Draft'
+    LEFT JOIN (SELECT DISTINCT sf_sku, pack_size FROM `artful-logic-475116-p1.staging_vip.sku_mapping`) sm ON sfo.sku = sm.sf_sku
+    WHERE sfo.order_status NOT IN ('Draft', 'Cancelled')
         AND sfo.order_date >= '{start_date}'
         AND sfo.order_date <= '{end_date}'
     GROUP BY sfo.order_date, day_of_week
@@ -84,13 +85,14 @@ def load_b2b_by_account(start_date: str, end_date: str):
         u.Name as owner_name,
         COUNT(DISTINCT sfo.order_id) as order_count,
         ROUND(SUM(CAST(sfo.line_total_price AS FLOAT64)), 2) as revenue,
-        SUM(CAST(sfo.quantity AS FLOAT64)) as units,
+        SUM(CAST(sfo.quantity AS FLOAT64) * COALESCE(sm.pack_size, 1)) as units,
         MAX(sfo.order_date) as last_order_date,
         MIN(sfo.order_date) as first_order_date
     FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
+    LEFT JOIN (SELECT DISTINCT sf_sku, pack_size FROM `artful-logic-475116-p1.staging_vip.sku_mapping`) sm ON sfo.sku = sm.sf_sku
     LEFT JOIN `artful-logic-475116-p1.raw_salesforce.Account` a ON sfo.account_id = a.Id
     LEFT JOIN `artful-logic-475116-p1.raw_salesforce.User` u ON a.OwnerId = u.Id
-    WHERE sfo.order_status != 'Draft'
+    WHERE sfo.order_status NOT IN ('Draft', 'Cancelled')
         AND sfo.order_date >= '{start_date}'
         AND sfo.order_date <= '{end_date}'
     GROUP BY sfo.account_id, sfo.customer_name, sfo.account_type, u.Name
@@ -103,12 +105,13 @@ def load_b2b_weekly(start_date: str, end_date: str):
     """Load B2B weekly aggregation."""
     return run_query(f"""
     SELECT
-        DATE_TRUNC(order_date, WEEK(MONDAY)) as week_start,
-        COUNT(DISTINCT order_id) as order_count,
-        ROUND(SUM(CAST(line_total_price AS FLOAT64)), 2) as revenue,
-        SUM(CAST(quantity AS FLOAT64)) as units
-    FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened`
-    WHERE order_status != 'Draft'
+        DATE_TRUNC(sfo.order_date, WEEK(MONDAY)) as week_start,
+        COUNT(DISTINCT sfo.order_id) as order_count,
+        ROUND(SUM(CAST(sfo.line_total_price AS FLOAT64)), 2) as revenue,
+        SUM(CAST(sfo.quantity AS FLOAT64) * COALESCE(sm.pack_size, 1)) as units
+    FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
+    LEFT JOIN (SELECT DISTINCT sf_sku, pack_size FROM `artful-logic-475116-p1.staging_vip.sku_mapping`) sm ON sfo.sku = sm.sf_sku
+    WHERE sfo.order_status NOT IN ('Draft', 'Cancelled')
         AND order_date >= '{start_date}'
         AND order_date <= '{end_date}'
     GROUP BY week_start
@@ -234,10 +237,11 @@ def load_b2b_by_state(start_date: str, end_date: str):
         UPPER(TRIM(a.ShippingState)) as state,
         COUNT(DISTINCT sfo.order_id) as order_count,
         ROUND(SUM(CAST(sfo.line_total_price AS FLOAT64)), 2) as revenue,
-        SUM(CAST(sfo.quantity AS FLOAT64)) as units
+        SUM(CAST(sfo.quantity AS FLOAT64) * COALESCE(sm.pack_size, 1)) as units
     FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
+    LEFT JOIN (SELECT DISTINCT sf_sku, pack_size FROM `artful-logic-475116-p1.staging_vip.sku_mapping`) sm ON sfo.sku = sm.sf_sku
     LEFT JOIN `artful-logic-475116-p1.raw_salesforce.Account` a ON sfo.account_id = a.Id
-    WHERE sfo.order_status != 'Draft'
+    WHERE sfo.order_status NOT IN ('Draft', 'Cancelled')
         AND sfo.order_date >= '{start_date}'
         AND sfo.order_date <= '{end_date}'
         AND a.ShippingState IS NOT NULL
@@ -277,7 +281,7 @@ def load_filter_options():
     FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
     LEFT JOIN `artful-logic-475116-p1.raw_salesforce.Account` a ON sfo.account_id = a.Id
     LEFT JOIN `artful-logic-475116-p1.raw_salesforce.User` u ON a.OwnerId = u.Id
-    WHERE sfo.order_status != 'Draft'
+    WHERE sfo.order_status NOT IN ('Draft', 'Cancelled')
         AND u.Name IS NOT NULL
     ORDER BY u.Name
     """)
@@ -285,7 +289,7 @@ def load_filter_options():
     account_types = run_query("""
     SELECT DISTINCT account_type
     FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened`
-    WHERE order_status != 'Draft'
+    WHERE order_status NOT IN ('Draft', 'Cancelled')
         AND account_type IS NOT NULL
     ORDER BY account_type
     """)
@@ -388,11 +392,12 @@ def load_b2b_sku_daily(start_date: str, end_date: str):
         sfo.order_date,
         sfo.product_code as sku,
         sfo.product_name,
-        SUM(CAST(sfo.quantity AS FLOAT64)) as units,
+        SUM(CAST(sfo.quantity AS FLOAT64) * COALESCE(sm.pack_size, 1)) as units,
         ROUND(SUM(CAST(sfo.line_total_price AS FLOAT64)), 2) as revenue,
         COUNT(DISTINCT sfo.order_id) as order_count
     FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
-    WHERE sfo.order_status != 'Draft'
+    LEFT JOIN (SELECT DISTINCT sf_sku, pack_size FROM `artful-logic-475116-p1.staging_vip.sku_mapping`) sm ON sfo.sku = sm.sf_sku
+    WHERE sfo.order_status NOT IN ('Draft', 'Cancelled')
         AND sfo.order_date >= '{start_date}'
         AND sfo.order_date <= '{end_date}'
         AND sfo.product_name IS NOT NULL
@@ -406,14 +411,15 @@ def load_b2b_sku_weekly(start_date: str, end_date: str):
     """Load B2B weekly aggregation by SKU."""
     return run_query(f"""
     SELECT
-        DATE_TRUNC(order_date, WEEK(MONDAY)) as week_start,
-        product_code as sku,
-        product_name,
-        SUM(CAST(quantity AS FLOAT64)) as units,
-        ROUND(SUM(CAST(line_total_price AS FLOAT64)), 2) as revenue,
-        COUNT(DISTINCT order_id) as order_count
-    FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened`
-    WHERE order_status != 'Draft'
+        DATE_TRUNC(sfo.order_date, WEEK(MONDAY)) as week_start,
+        sfo.product_code as sku,
+        sfo.product_name,
+        SUM(CAST(sfo.quantity AS FLOAT64) * COALESCE(sm.pack_size, 1)) as units,
+        ROUND(SUM(CAST(sfo.line_total_price AS FLOAT64)), 2) as revenue,
+        COUNT(DISTINCT sfo.order_id) as order_count
+    FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
+    LEFT JOIN (SELECT DISTINCT sf_sku, pack_size FROM `artful-logic-475116-p1.staging_vip.sku_mapping`) sm ON sfo.sku = sm.sf_sku
+    WHERE sfo.order_status NOT IN ('Draft', 'Cancelled')
         AND order_date >= '{start_date}'
         AND order_date <= '{end_date}'
         AND product_name IS NOT NULL
