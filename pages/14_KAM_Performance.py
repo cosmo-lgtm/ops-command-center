@@ -66,18 +66,35 @@ def load_door_data():
 
 @st.cache_data(ttl=300)
 def load_all_doors_for_scorecard():
-    """Full outlet universe (chains + independents) for B2B scorecard totals.
-    Matches VIP's 'cleansed outlet information' report scope.
+    """Full outlet universe from the canonical v_door_universe view.
+
+    This is the SAME view the Salesforce Field Sales LWC reads from, so the
+    two dashboards cannot disagree on what "the universe" is. If this number
+    ever drifts from the SFDC dashboard, check v_door_universe — don't patch
+    one side.
     """
     client = get_bq_client()
     query = """
     SELECT
-        vip_id, chain_name, channel_type,
+        vip_id, sf_account_id, chain_name, channel_type,
         qty_ytd, qty_last_30_days, qty_previous_30_days,
-        qty_last_90_days, qty_previous_90_days
-    FROM `staging_vip.retail_customer_fact_sheet_2026`
+        qty_last_90_days, qty_previous_90_days, pod_ytd
+    FROM `analytics.v_door_universe`
     """
     return client.query(query).to_dataframe()
+
+
+@st.cache_data(ttl=300)
+def load_universe_totals():
+    """Single-row canonical universe totals. The source of truth for the
+    four BANs above the scorecard table. Both this dashboard and the SFDC
+    Field Sales LWC derive their all-up totals from v_door_universe.
+    """
+    client = get_bq_client()
+    row = client.query(
+        "SELECT * FROM `analytics.v_universe_totals_ytd`"
+    ).to_dataframe().iloc[0]
+    return row.to_dict()
 
 
 @st.cache_data(ttl=300)
@@ -504,6 +521,7 @@ try:
     chain_df = load_chain_data()
     sku_df = load_sku_data()
     all_doors_df = load_all_doors_for_scorecard()
+    universe_totals = load_universe_totals()
     data_through = load_data_through_dates()
 except Exception as e:
     st.error(f"Failed to load data: {e}")
@@ -600,12 +618,17 @@ with tab0:
         for (name, _uom, actual, prior, _suffix, _fmt) in sc_kpis
     ])
 
-    # BANs — uniform visual treatment: single-color headline number, small
-    # delta chip underneath showing % vs prior period. Every card shares the
-    # same anatomy so the header row reads as one unit (same approach the
-    # Salesforce Field Sales dashboard uses).
-    depl_current = sc_kpis[0][2]; depl_prior = sc_kpis[0][3]
-    active_val = sc_kpis[1][2];   active_prior = sc_kpis[1][3]
+    # BANs — read directly from v_universe_totals_ytd when showing the
+    # all-up universe. This is the SAME view the Salesforce Field Sales
+    # dashboard reads, so the two cannot drift. For chain-filtered views,
+    # fall back to the in-memory sc_doors frame (also sourced from
+    # v_door_universe) so the filter still works client-side.
+    if sc_selected == "All Chains":
+        ytd_depl = float(universe_totals.get('ytd_volume') or 0)
+        ytd_active = int(universe_totals.get('ytd_active_doors') or 0)
+    else:
+        ytd_depl = float(sc_doors['qty_ytd'].fillna(0).sum())
+        ytd_active = int((sc_doors['qty_ytd'].fillna(0) > 0).sum())
     velocity_val = sc_kpis[3][2]; velocity_prior = sc_kpis[3][3]
     reorder_val = sc_kpis[5][2];  reorder_prior = sc_kpis[5][3]
 
@@ -636,12 +659,12 @@ with tab0:
 
     st.markdown(
         "<div class='bn-row'>"
-        + _ban("Depletions (L90D)", format_number(depl_current),
-               depl_current, depl_prior, "case equivalents")
-        + _ban("Did Buys", format_number(active_val),
-               active_val, active_prior, "doors w/ sales (L90D)")
+        + _ban("YTD Volume", format_number(ytd_depl),
+               ytd_depl, None, "case equivalents · YTD")
+        + _ban("Active Doors", format_number(ytd_active),
+               ytd_active, None, "doors w/ YTD sales")
         + _ban("Velocity / Acct", f"{velocity_val:,.1f}",
-               velocity_val, velocity_prior, "CE per active door")
+               velocity_val, velocity_prior, "CE per active door (L90D)")
         + _ban("Reorder Rate", f"{reorder_val:,.1f}%",
                reorder_val, reorder_prior, "ordering 2x+ in 90D")
         + "</div>",
