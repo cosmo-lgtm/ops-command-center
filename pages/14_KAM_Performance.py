@@ -253,17 +253,19 @@ def compute_scorecard_kpis(doors, skus, chain_filter="All Chains"):
         velocity = depl_current / active_current if active_current > 0 else 0
         velocity_prior = depl_prior / active_prior if active_prior > 0 else 0
 
-        # 5. Off-Premise Buying % — join channel_type from door fact sheet
+        # 5. Off-Premise Buying % — from door fact sheet (has channel_type)
+        # Only count doors that have channel metadata (fact sheet universe)
+        known_vids = set(doors['vip_id'])
         off_prem_vids = set(
             doors[doors['channel_type'] == 'Off-Premise']['vip_id']
         )
-        active_l3m_ids = set(skus[skus['_l3m'] > 0]['vip_id'])
-        active_p3m_ids = set(skus[skus['_p3m'] > 0]['vip_id'])
+        active_l3m_known = set(skus[skus['_l3m'] > 0]['vip_id']) & known_vids
+        active_p3m_known = set(skus[skus['_p3m'] > 0]['vip_id']) & known_vids
 
-        off_prem_current = len(active_l3m_ids & off_prem_vids)
-        off_prem_prior = len(active_p3m_ids & off_prem_vids)
-        off_prem_pct = off_prem_current / active_current * 100 if active_current > 0 else 0
-        off_prem_pct_prior = off_prem_prior / active_prior * 100 if active_prior > 0 else 0
+        off_prem_current = len(active_l3m_known & off_prem_vids)
+        off_prem_prior = len(active_p3m_known & off_prem_vids)
+        off_prem_pct = off_prem_current / len(active_l3m_known) * 100 if active_l3m_known else 0
+        off_prem_pct_prior = off_prem_prior / len(active_p3m_known) * 100 if active_p3m_known else 0
 
         # 6. Reorder Rate (doors ordering in 2+ of last 3 months)
         door_months = skus.groupby('vip_id')[last_3].sum()
