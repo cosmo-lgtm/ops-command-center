@@ -207,9 +207,9 @@ SCORECARD_CSS = """
 def compute_scorecard_kpis(doors, skus, chain_filter="All Chains"):
     """Compute all B2B scorecard KPIs with current vs prior period.
 
-    All metrics derived from monthly SKU data (chain_sales_report) for accuracy.
-    The door fact sheet's rolling period columns are unreliable for QoQ comparison.
-    Door-level metadata (channel_type) still comes from the fact sheet.
+    Uses rolling L90D windows from the door fact sheet (qty_last_90_days,
+    qty_previous_90_days) to stay current and match VIP industry standard.
+    SKU-level data used only for SKUs-per-account and reorder rate.
     """
     if chain_filter != "All Chains":
         doors = doors[doors['chain_name'] == chain_filter].copy()
@@ -218,67 +218,62 @@ def compute_scorecard_kpis(doors, skus, chain_filter="All Chains"):
         doors = doors.copy()
         skus = skus.copy()
 
-    last_3 = ['nov_25', 'dec_25', 'jan_26']
-    prior_3 = ['aug_25', 'sep_25', 'oct_25']
+    if len(doors) > 0:
+        # 1. Depletions L90D vs Prior 90D (case equivalents) — from fact sheet
+        depl_current = doors['qty_last_90_days'].sum()
+        depl_prior = doors['qty_previous_90_days'].sum()
 
-    if len(skus) > 0:
-        skus['_l3m'] = skus[last_3].sum(axis=1)
-        skus['_p3m'] = skus[prior_3].sum(axis=1)
+        # YTD
+        ytd_total = doors['qty_ytd'].sum()
 
-        # 1. Depletions L3M vs Prior 3M (case equivalents) — from monthly SKU data
-        depl_current = skus['_l3m'].sum()
-        depl_prior = skus['_p3m'].sum()
+        # 2. Active Doors (doors with sales in L90D / prior 90D)
+        active_current = len(doors[doors['qty_last_90_days'] > 0])
+        active_prior = len(doors[doors['qty_previous_90_days'] > 0])
 
-        # YTD = all months in 2026 (jan_26 only currently)
-        ytd_total = skus['jan_26'].sum() if 'jan_26' in skus.columns else 0
+        # 3. SKUs per Account — need SKU-level data for distinct item counts
+        if len(skus) > 0:
+            # Use ttm_current/ttm_prior from chain_sales_report as proxy
+            current_sku_per_door = (
+                skus[skus['ttm_current'] > 0]
+                .groupby('vip_id')['item_code'].nunique()
+            )
+            skus_per_acct = current_sku_per_door.mean() if len(current_sku_per_door) > 0 else 0
 
-        # 2. Active Doors (distinct vip_ids with sales in period)
-        active_current = skus[skus['_l3m'] > 0]['vip_id'].nunique()
-        active_prior = skus[skus['_p3m'] > 0]['vip_id'].nunique()
-
-        # 3. SKUs per Account (avg distinct items per active door)
-        current_sku_per_door = (
-            skus[skus['_l3m'] > 0]
-            .groupby('vip_id')['item_code'].nunique()
-        )
-        skus_per_acct = current_sku_per_door.mean() if len(current_sku_per_door) > 0 else 0
-
-        prior_sku_per_door = (
-            skus[skus['_p3m'] > 0]
-            .groupby('vip_id')['item_code'].nunique()
-        )
-        skus_per_acct_prior = prior_sku_per_door.mean() if len(prior_sku_per_door) > 0 else 0
+            prior_sku_per_door = (
+                skus[skus['ttm_prior'] > 0]
+                .groupby('vip_id')['item_code'].nunique()
+            )
+            skus_per_acct_prior = prior_sku_per_door.mean() if len(prior_sku_per_door) > 0 else 0
+        else:
+            skus_per_acct = skus_per_acct_prior = 0
 
         # 4. Velocity per Account (CE per active door)
         velocity = depl_current / active_current if active_current > 0 else 0
         velocity_prior = depl_prior / active_prior if active_prior > 0 else 0
 
         # 5. Off-Premise Buying % — from door fact sheet (has channel_type)
-        # Only count doors that have channel metadata (fact sheet universe)
-        known_vids = set(doors['vip_id'])
         off_prem_vids = set(
             doors[doors['channel_type'] == 'Off-Premise']['vip_id']
         )
-        active_l3m_known = set(skus[skus['_l3m'] > 0]['vip_id']) & known_vids
-        active_p3m_known = set(skus[skus['_p3m'] > 0]['vip_id']) & known_vids
+        active_l90 = set(doors[doors['qty_last_90_days'] > 0]['vip_id'])
+        active_p90 = set(doors[doors['qty_previous_90_days'] > 0]['vip_id'])
 
-        off_prem_current = len(active_l3m_known & off_prem_vids)
-        off_prem_prior = len(active_p3m_known & off_prem_vids)
-        off_prem_pct = off_prem_current / len(active_l3m_known) * 100 if active_l3m_known else 0
-        off_prem_pct_prior = off_prem_prior / len(active_p3m_known) * 100 if active_p3m_known else 0
+        off_prem_current = len(active_l90 & off_prem_vids)
+        off_prem_prior = len(active_p90 & off_prem_vids)
+        off_prem_pct = off_prem_current / len(active_l90) * 100 if active_l90 else 0
+        off_prem_pct_prior = off_prem_prior / len(active_p90) * 100 if active_p90 else 0
 
-        # 6. Reorder Rate (doors ordering in 2+ of last 3 months)
-        door_months = skus.groupby('vip_id')[last_3].sum()
-        months_active = (door_months > 0).sum(axis=1)
-        total_active_sku = len(months_active[months_active > 0])
-        reorder_doors = len(months_active[months_active >= 2])
-        reorder_rate = reorder_doors / total_active_sku * 100 if total_active_sku > 0 else 0
+        # 6. Reorder Rate — doors with orders in 2+ of last 3 months (L30 + P30 + P60-90)
+        # Approximate from fact sheet: doors ordering in both L30 and P30 windows
+        ordered_l30 = doors['qty_last_30_days'] > 0
+        ordered_p30 = doors['qty_previous_30_days'] > 0
+        any_active = doors['qty_last_90_days'] > 0
+        total_active_doors = any_active.sum()
+        reorder_doors = (ordered_l30 & ordered_p30).sum()
+        reorder_rate = reorder_doors / total_active_doors * 100 if total_active_doors > 0 else 0
 
-        door_months_prior = skus.groupby('vip_id')[prior_3].sum()
-        months_active_prior = (door_months_prior > 0).sum(axis=1)
-        total_active_prior = len(months_active_prior[months_active_prior > 0])
-        reorder_prior = len(months_active_prior[months_active_prior >= 2])
-        reorder_rate_prior = reorder_prior / total_active_prior * 100 if total_active_prior > 0 else 0
+        # Prior period reorder approximation not available from fact sheet — show vs current
+        reorder_rate_prior = 0  # No prior granularity available
     else:
         depl_current = depl_prior = ytd_total = 0
         active_current = active_prior = 0
@@ -288,12 +283,12 @@ def compute_scorecard_kpis(doors, skus, chain_filter="All Chains"):
         reorder_rate = reorder_rate_prior = 0
 
     kpis = [
-        ("Depletions", "Case equivs (L3M)", depl_current, depl_prior, "", ",.0f"),
-        ("Accounts Buying\n(Active Doors)", "# of active doors (L3M)", active_current, active_prior, "", ",.0f"),
-        ("SKUs per Account", "Avg SKUs / door (L3M)", skus_per_acct, skus_per_acct_prior, "", ",.1f"),
-        ("Velocity per Account", "Case equivs / door (L3M)", velocity, velocity_prior, "", ",.1f"),
-        ("Off-Premise Buying %", "Off-Prem doors / Total (L3M)", off_prem_pct, off_prem_pct_prior, "%", ",.1f"),
-        ("Reorder Rate", "Doors ordering 2x+ (L3M)", reorder_rate, reorder_rate_prior, "%", ",.1f"),
+        ("Depletions", "Case equivs (L90D)", depl_current, depl_prior, "", ",.0f"),
+        ("Accounts Buying\n(Did Buys)", "Doors w/ sales (L90D)", active_current, active_prior, "", ",.0f"),
+        ("SKUs per Account", "Avg SKUs / door", skus_per_acct, skus_per_acct_prior, "", ",.1f"),
+        ("Velocity per Account", "CE / active door (L90D)", velocity, velocity_prior, "", ",.1f"),
+        ("Off-Premise Buying %", "Off-Prem / Total (L90D)", off_prem_pct, off_prem_pct_prior, "%", ",.1f"),
+        ("Reorder Rate", "Doors ordering 2x+ (L90D)", reorder_rate, reorder_rate_prior, "%", ",.1f"),
     ]
     return kpis, ytd_total
 
@@ -339,10 +334,10 @@ def render_scorecard_html(kpis):
                 <tr>
                     <th>KPI</th>
                     <th>UoM</th>
-                    <th>Actuals</th>
+                    <th>Actuals (L90D)</th>
                     <th>Prior Period</th>
-                    <th>QoQ Chg</th>
-                    <th>QoQ % Chg</th>
+                    <th>Chg</th>
+                    <th>% Chg</th>
                 </tr>
             </thead>
             <tbody>{rows}
@@ -430,19 +425,19 @@ with tab0:
 
     # BANs — top 4 headline metrics
     b1, b2, b3, b4 = st.columns(4)
-    active_val = sc_kpis[1][2]    # Active Doors (L90D)
+    active_val = sc_kpis[1][2]    # Did Buys (L90D)
     velocity_val = sc_kpis[3][2]  # Velocity per Account
     reorder_val = sc_kpis[5][2]   # Reorder Rate
 
     with b1:
         render_metric("YTD Depletions", format_number(ytd_val), "case equivalents", color="green")
     with b2:
-        render_metric("Active Doors", format_number(active_val), "L3M", color="purple")
+        render_metric("Did Buys", format_number(active_val), "L90D", color="purple")
     with b3:
-        render_metric("Velocity / Acct", f"{velocity_val:,.1f}", "CE per door (L3M)", color="gold")
+        render_metric("Velocity / Acct", f"{velocity_val:,.1f}", "CE per door (L90D)", color="gold")
     with b4:
         reorder_color = "green" if reorder_val >= 40 else "red" if reorder_val < 25 else "gold"
-        render_metric("Reorder Rate", f"{reorder_val:,.1f}%", "2x+ orders (L3M)", color=reorder_color)
+        render_metric("Reorder Rate", f"{reorder_val:,.1f}%", "2x+ orders (L90D)", color=reorder_color)
 
     # Scorecard table
     st.markdown(render_scorecard_html(sc_kpis), unsafe_allow_html=True)
