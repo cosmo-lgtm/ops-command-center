@@ -244,6 +244,83 @@ SCORECARD_CSS = """
     font-size: 1rem;
     opacity: 0.4;
 }
+
+/* ── BAN row (uniform 4-card header) ───────────────────────── */
+.bn-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 20px;
+}
+.bn-card {
+    font-family: 'Jost', 'Helvetica', sans-serif;
+    background: #ffffff;
+    border-radius: 20px;
+    padding: 20px 22px 18px 22px;
+    border: 1px solid rgba(45, 41, 38, 0.06);
+    box-shadow: 0 1px 2px rgba(45,41,38,0.04), 0 6px 18px rgba(45,41,38,0.05);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 150px;
+}
+.bn-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: #000000;
+}
+.bn-value {
+    font-size: 2.4rem;
+    font-weight: 700;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    color: #000000;
+    font-variant-numeric: tabular-nums;
+    margin: 2px 0 0 0;
+}
+.bn-sub {
+    font-size: 0.75rem;
+    color: #000000;
+    font-weight: 500;
+    margin-bottom: 8px;
+}
+.bn-bar {
+    position: relative;
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(45, 41, 38, 0.08);
+    overflow: hidden;
+    margin-top: auto;
+}
+.bn-bar-prior {
+    position: absolute;
+    top: 0; left: 0;
+    height: 100%;
+    background: rgba(45, 41, 38, 0.22);
+    border-radius: 999px;
+}
+.bn-bar-current {
+    position: absolute;
+    top: 0; left: 0;
+    height: 100%;
+    background: #1b5e20;
+    border-radius: 999px;
+}
+.bn-chip {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    align-self: flex-start;
+}
+.bn-chip-pos { background: rgba(27, 94, 32, 0.10); color: #1b5e20; }
+.bn-chip-neg { background: rgba(176, 77, 94, 0.12); color: #b04d5e; }
+.bn-chip-neutral { background: rgba(45, 41, 38, 0.08); color: #000000; }
 </style>
 """
 
@@ -523,21 +600,53 @@ with tab0:
         for (name, _uom, actual, prior, _suffix, _fmt) in sc_kpis
     ])
 
-    # BANs — top 4 headline metrics
-    b1, b2, b3, b4 = st.columns(4)
-    active_val = sc_kpis[1][2]    # Did Buys (L90D)
-    velocity_val = sc_kpis[3][2]  # Velocity per Account
-    reorder_val = sc_kpis[5][2]   # Reorder Rate
+    # BANs — uniform visual treatment: single-color headline number, small
+    # delta chip underneath showing % vs prior period. Every card shares the
+    # same anatomy so the header row reads as one unit (same approach the
+    # Salesforce Field Sales dashboard uses).
+    depl_current = sc_kpis[0][2]; depl_prior = sc_kpis[0][3]
+    active_val = sc_kpis[1][2];   active_prior = sc_kpis[1][3]
+    velocity_val = sc_kpis[3][2]; velocity_prior = sc_kpis[3][3]
+    reorder_val = sc_kpis[5][2];  reorder_prior = sc_kpis[5][3]
 
-    with b1:
-        render_metric("YTD Depletions", format_number(ytd_val), "case equivalents", color="green")
-    with b2:
-        render_metric("Did Buys", format_number(active_val), "L90D", color="purple")
-    with b3:
-        render_metric("Velocity / Acct", f"{velocity_val:,.1f}", "CE per door (L90D)", color="gold")
-    with b4:
-        reorder_color = "green" if reorder_val >= 40 else "red" if reorder_val < 25 else "gold"
-        render_metric("Reorder Rate", f"{reorder_val:,.1f}%", "2x+ orders (L90D)", color=reorder_color)
+    def _ban(title, value, current, prior, sublabel):
+        if prior and prior != 0:
+            pct = (current - prior) / prior * 100
+            chip_class = "bn-chip-pos" if pct > 0 else "bn-chip-neg" if pct < 0 else "bn-chip-neutral"
+            arrow = "▲" if pct > 0 else "▼" if pct < 0 else "—"
+            chip_text = f"{arrow} {abs(pct):.1f}% vs prior 90D"
+            fill_pct = max(0, min(100, (current / max(prior, current)) * 100)) if current else 0
+            prior_pct = max(0, min(100, (prior / max(prior, current)) * 100)) if prior else 0
+        else:
+            chip_class = "bn-chip-neutral"
+            chip_text = "New — no prior period"
+            fill_pct = 100 if current else 0
+            prior_pct = 0
+        return f"""
+        <div class='bn-card'>
+            <div class='bn-label'>{title}</div>
+            <div class='bn-value'>{value}</div>
+            <div class='bn-sub'>{sublabel}</div>
+            <div class='bn-bar'>
+                <div class='bn-bar-prior' style='width:{prior_pct:.1f}%'></div>
+                <div class='bn-bar-current' style='width:{fill_pct:.1f}%'></div>
+            </div>
+            <div class='bn-chip {chip_class}'>{chip_text}</div>
+        </div>"""
+
+    st.markdown(
+        "<div class='bn-row'>"
+        + _ban("Depletions (L90D)", format_number(depl_current),
+               depl_current, depl_prior, "case equivalents")
+        + _ban("Did Buys", format_number(active_val),
+               active_val, active_prior, "doors w/ sales (L90D)")
+        + _ban("Velocity / Acct", f"{velocity_val:,.1f}",
+               velocity_val, velocity_prior, "CE per active door")
+        + _ban("Reorder Rate", f"{reorder_val:,.1f}%",
+               reorder_val, reorder_prior, "ordering 2x+ in 90D")
+        + "</div>",
+        unsafe_allow_html=True,
+    )
 
     # Scorecard table
     st.markdown(render_scorecard_html(sc_kpis), unsafe_allow_html=True)
