@@ -11,6 +11,7 @@ from datetime import datetime, date
 import plotly.graph_objects as go
 import plotly.express as px
 import numpy as np
+import hashlib
 
 from nowadays_ui import editorial_plotly, inject_editorial_style
 
@@ -917,8 +918,11 @@ def main():
                 else ('Woo' if _f(r['woo_orders']) > 0 else 'Shopify'),
                 axis=1
             )
+            display_df['email'] = display_df['email'].apply(
+                lambda e: hashlib.sha256(e.encode()).hexdigest()[:12] if pd.notna(e) else ''
+            )
             display_df = display_df[['email', 'lifetime_orders', 'lifetime_revenue', 'first_order', 'last_order', 'platform', 'refunded_orders']]
-            display_df.columns = ['Email', 'Orders', 'Revenue', 'First Order', 'Last Order', 'Platform', 'Refunds']
+            display_df.columns = ['Customer ID', 'Orders', 'Revenue', 'First Order', 'Last Order', 'Platform', 'Refunds']
 
             st.dataframe(display_df, use_container_width=True, hide_index=True, height=600)
 
