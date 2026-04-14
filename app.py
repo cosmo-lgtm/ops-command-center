@@ -234,11 +234,6 @@ DASHBOARDS = [
      "Field sales performance — distributor velocity, rep activity, territory coverage, year-over-year comparisons.",
      "Sales"),
 
-    ("DTC_Metrics", "shopping_cart", "cream",
-     "DTC Metrics",
-     "Direct-to-consumer commerce overview — orders, AOV, conversion, channel mix across Shopify and WooCommerce.",
-     "DTC"),
-
     ("Marketing_Scorecard", "campaign", "yellow",
      "Marketing Scorecard",
      "Cross-channel marketing performance — paid social, email, organic, attribution, and ROAS by campaign.",
