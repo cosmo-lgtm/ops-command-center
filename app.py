@@ -229,11 +229,6 @@ DASHBOARDS = [
      "B2C customer support analytics — CSAT scores, resolution times, agent performance, and ticket backlog.",
      "Support"),
 
-    ("Visit_Performance", "explore", "yellow",
-     "Visit Performance",
-     "Sales rep check-in attribution — visit-to-depletion conversion, POD growth tracking, route effectiveness.",
-     "Sales"),
-
     ("Sales_Dashboard", "trending_up", "green",
      "Sales Dashboard",
      "Field sales performance — distributor velocity, rep activity, territory coverage, year-over-year comparisons.",
