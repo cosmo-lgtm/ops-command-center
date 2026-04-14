@@ -126,7 +126,7 @@ def load_inventory_data(lookback_days: int = 90):
         FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
         LEFT JOIN sku_map sm ON sfo.sku = sm.sf_sku
         WHERE sfo.account_type IN ('Distributor', 'Distribution Center')
-            AND sfo.order_status != 'Draft'
+            AND sfo.order_status NOT IN ('Draft', 'Cancelled')
             AND sfo.order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_days} DAY)
             AND sfo.order_date <= CURRENT_DATE()
             AND (sfo.pricebook_name IS NULL OR (
@@ -440,7 +440,7 @@ def load_trend_data(lookback_weeks: int = 12):
         FROM `artful-logic-475116-p1.staging_salesforce.salesforce_orders_flattened` sfo
         LEFT JOIN sku_map sm ON sfo.sku = sm.sf_sku
         WHERE sfo.account_type IN ('Distributor', 'Distribution Center')
-            AND sfo.order_status != 'Draft'
+            AND sfo.order_status NOT IN ('Draft', 'Cancelled')
             AND sfo.order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {lookback_weeks} WEEK)
             AND sfo.order_date <= CURRENT_DATE()
             AND (sfo.pricebook_name IS NULL OR (
