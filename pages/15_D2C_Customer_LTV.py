@@ -473,7 +473,7 @@ def main():
     """, unsafe_allow_html=True)
 
     # --- Filters ---
-    filter_cols = st.columns([2, 1, 1, 1])
+    filter_cols = st.columns([3, 1, 1])
     with filter_cols[0]:
         platform = st.radio(
             "Platform",
@@ -485,11 +485,6 @@ def main():
         date_start = st.date_input("From", value=None, min_value=date(2023, 1, 1), max_value=date.today(), key="ltv_date_start")
     with filter_cols[2]:
         date_end = st.date_input("To", value=None, min_value=date(2023, 1, 1), max_value=date.today(), key="ltv_date_end")
-    with filter_cols[3]:
-        if st.button("Clear dates", use_container_width=True):
-            st.session_state["ltv_date_start"] = None
-            st.session_state["ltv_date_end"] = None
-            st.rerun()
 
     ds = str(date_start) if date_start else None
     de = str(date_end) if date_end else None
