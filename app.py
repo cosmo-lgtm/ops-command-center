@@ -234,11 +234,6 @@ DASHBOARDS = [
      "Sales rep check-in attribution — visit-to-depletion conversion, POD growth tracking, route effectiveness.",
      "Sales"),
 
-    ("Shopify_Forecast", "auto_graph", "navy",
-     "Shopify Forecast",
-     "DTC revenue forecasting from Shopify order history — demand projections, product mix, seasonality.",
-     "DTC"),
-
     ("Sales_Dashboard", "trending_up", "green",
      "Sales Dashboard",
      "Field sales performance — distributor velocity, rep activity, territory coverage, year-over-year comparisons.",
