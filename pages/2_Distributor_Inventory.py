@@ -951,7 +951,7 @@ def main():
     with col_uom:
         unit_mode = st.selectbox(
             "Unit of Measure",
-            options=['Units', 'Cases'],
+            options=['Cases', 'Units'],
             index=0,
             help="Units = individual bottles/cans/shots. Cases = distributor selling units."
         )
