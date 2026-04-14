@@ -127,6 +127,227 @@ def get_volume_col(period):
 
 GRADIENT_COLORS = ['#667eea', '#764ba2', '#f093fb', '#f5576c', '#ffd700', '#64ffda', '#4facfe', '#00f2fe']
 
+SCORECARD_CSS = """
+<style>
+.scorecard-wrap {
+    font-family: 'Jost', sans-serif;
+    background: #fef6ee;
+    border-radius: 18px;
+    padding: 32px 36px 24px 36px;
+    border: 1.5px solid #e8ddd0;
+    margin-bottom: 24px;
+}
+.scorecard-title {
+    font-family: 'Jost', sans-serif;
+    font-weight: 700;
+    font-size: 1.6rem;
+    color: #2D2926;
+    margin-bottom: 4px;
+}
+.scorecard-title em {
+    font-style: italic;
+    font-weight: 400;
+}
+.scorecard-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'Jost', sans-serif;
+    font-size: 0.92rem;
+}
+.scorecard-table thead th {
+    background: #3d3530;
+    color: #fff;
+    padding: 10px 14px;
+    text-align: center;
+    font-weight: 600;
+    font-size: 0.85rem;
+    letter-spacing: 0.02em;
+}
+.scorecard-table thead th:first-child {
+    text-align: left;
+    border-radius: 8px 0 0 0;
+}
+.scorecard-table thead th:last-child {
+    border-radius: 0 8px 0 0;
+}
+.scorecard-table tbody td {
+    padding: 10px 14px;
+    text-align: center;
+    border-bottom: 1px solid #e8ddd0;
+    color: #2D2926;
+}
+.scorecard-table tbody td:first-child {
+    text-align: left;
+    font-weight: 600;
+}
+.scorecard-table tbody td:nth-child(2) {
+    font-size: 0.82rem;
+    color: #7a6f63;
+    font-style: italic;
+}
+.scorecard-table tbody tr:nth-child(even) {
+    background: #f7efe4;
+}
+.scorecard-table tbody tr:nth-child(odd) {
+    background: #fef9f1;
+}
+.scorecard-table .sc-pos { color: #2e7d32; font-weight: 600; }
+.scorecard-table .sc-neg { color: #c62828; font-weight: 600; }
+.scorecard-table .sc-neutral { color: #7a6f63; }
+.scorecard-footer {
+    text-align: right;
+    margin-top: 10px;
+    font-size: 1.2rem;
+    opacity: 0.6;
+}
+</style>
+"""
+
+
+def compute_scorecard_kpis(doors, skus, chain_filter="All Chains"):
+    """Compute all 6 B2B scorecard KPIs with current vs prior period.
+
+    All comparisons use L90D vs Prior L90D for apples-to-apples QoQ comparison.
+    YTD is surfaced separately in BANs.
+    """
+    if chain_filter != "All Chains":
+        doors = doors[doors['chain_name'] == chain_filter].copy()
+        skus = skus[skus['chain_name'] == chain_filter].copy()
+    else:
+        doors = doors.copy()
+        skus = skus.copy()
+
+    # 1. Depletions L90D vs Prior L90D (case equivalents)
+    depl_current = doors['qty_last_90_days'].sum()
+    depl_prior = doors['qty_previous_90_days'].sum()
+
+    # Also capture YTD for BAN display
+    ytd_total = doors['qty_ytd'].sum()
+
+    # 2. Accounts Buying (Active Doors L90D)
+    active_90d = len(doors[doors['qty_last_90_days'] > 0])
+    active_prev_90d = len(doors[doors['qty_previous_90_days'] > 0])
+
+    # 3. SKUs per Account (distinct items per active door)
+    if len(skus) > 0:
+        # Current: doors with sales in last 3 months (nov, dec, jan)
+        last_3 = ['nov_25', 'dec_25', 'jan_26']
+        prior_3 = ['aug_25', 'sep_25', 'oct_25']
+
+        skus['_l3m'] = skus[last_3].sum(axis=1)
+        skus['_p3m'] = skus[prior_3].sum(axis=1)
+
+        current_sku_per_door = (
+            skus[skus['_l3m'] > 0]
+            .groupby('vip_id')['item_code'].nunique()
+        )
+        skus_per_acct = current_sku_per_door.mean() if len(current_sku_per_door) > 0 else 0
+
+        prior_sku_per_door = (
+            skus[skus['_p3m'] > 0]
+            .groupby('vip_id')['item_code'].nunique()
+        )
+        skus_per_acct_prior = prior_sku_per_door.mean() if len(prior_sku_per_door) > 0 else 0
+    else:
+        skus_per_acct = 0
+        skus_per_acct_prior = 0
+
+    # 4. Velocity per Account (case equivs L90D / active doors L90D)
+    velocity = depl_current / active_90d if active_90d > 0 else 0
+    velocity_prior = depl_prior / active_prev_90d if active_prev_90d > 0 else 0
+
+    # 5. Off-Premise Buying % (off-premise active doors / total active L90D)
+    off_prem_active = len(doors[
+        (doors['channel_type'] == 'Off-Premise') & (doors['qty_last_90_days'] > 0)
+    ])
+    off_prem_pct = off_prem_active / active_90d * 100 if active_90d > 0 else 0
+    off_prem_active_prior = len(doors[
+        (doors['channel_type'] == 'Off-Premise') & (doors['qty_previous_90_days'] > 0)
+    ])
+    off_prem_pct_prior = off_prem_active_prior / active_prev_90d * 100 if active_prev_90d > 0 else 0
+
+    # 6. Reorder Rate (doors ordering in 2+ of last 3 months vs prior 3)
+    if len(skus) > 0:
+        door_months = skus.groupby('vip_id')[last_3].sum()
+        months_active = (door_months > 0).sum(axis=1)
+        total_active_sku = len(months_active[months_active > 0])
+        reorder_doors = len(months_active[months_active >= 2])
+        reorder_rate = reorder_doors / total_active_sku * 100 if total_active_sku > 0 else 0
+
+        door_months_prior = skus.groupby('vip_id')[prior_3].sum()
+        months_active_prior = (door_months_prior > 0).sum(axis=1)
+        total_active_prior = len(months_active_prior[months_active_prior > 0])
+        reorder_prior = len(months_active_prior[months_active_prior >= 2])
+        reorder_rate_prior = reorder_prior / total_active_prior * 100 if total_active_prior > 0 else 0
+
+    else:
+        reorder_rate = 0
+        reorder_rate_prior = 0
+
+    kpis = [
+        ("Depletions", "Case equivs (L90D)", depl_current, depl_prior, "", ",.0f"),
+        ("Accounts Buying\n(Active Doors)", "# of active doors (L90D)", active_90d, active_prev_90d, "", ",.0f"),
+        ("SKUs per Account", "Avg SKUs / door (L3M)", skus_per_acct, skus_per_acct_prior, "", ",.1f"),
+        ("Velocity per Account", "Case equivs / door (L90D)", velocity, velocity_prior, "", ",.1f"),
+        ("Off-Premise Buying %", "Off-Prem doors / Total (L90D)", off_prem_pct, off_prem_pct_prior, "%", ",.1f"),
+        ("Reorder Rate", "Doors ordering 2x+ (L3M)", reorder_rate, reorder_rate_prior, "%", ",.1f"),
+    ]
+    return kpis, ytd_total
+
+
+def render_scorecard_html(kpis):
+    """Render the B2B Sales Scorecard as a styled HTML table."""
+    rows = ""
+    for name, uom, actual, prior, suffix, fmt in kpis:
+        chg = actual - prior
+
+        actual_str = f"{actual:{fmt}}{suffix}"
+        prior_str = f"{prior:{fmt}}{suffix}"
+
+        chg_class = "sc-pos" if chg > 0 else "sc-neg" if chg < 0 else "sc-neutral"
+        chg_sign = "+" if chg > 0 else ""
+        chg_str = f"{chg_sign}{chg:{fmt}}{suffix}"
+
+        if prior and prior != 0:
+            pct_chg = (actual - prior) / prior * 100
+            pct_class = "sc-pos" if pct_chg > 0 else "sc-neg" if pct_chg < 0 else "sc-neutral"
+            pct_sign = "+" if pct_chg > 0 else ""
+            pct_str = f"{pct_sign}{pct_chg:,.1f}%"
+        else:
+            pct_class = "sc-pos" if actual > 0 else "sc-neutral"
+            pct_str = "New" if actual > 0 else "—"
+
+        display_name = name.replace("\n", "<br>")
+        rows += f"""
+        <tr>
+            <td>{display_name}</td>
+            <td>{uom}</td>
+            <td>{actual_str}</td>
+            <td>{prior_str}</td>
+            <td class="{chg_class}">{chg_str}</td>
+            <td class="{pct_class}">{pct_str}</td>
+        </tr>"""
+
+    return f"""
+    <div class="scorecard-wrap">
+        <div class="scorecard-title"><em>Nowadays</em> B2B Sales Scorecard — 2026</div>
+        <table class="scorecard-table">
+            <thead>
+                <tr>
+                    <th>KPI</th>
+                    <th>UoM</th>
+                    <th>Actuals</th>
+                    <th>Prior Period</th>
+                    <th>QoQ Chg</th>
+                    <th>QoQ % Chg</th>
+                </tr>
+            </thead>
+            <tbody>{rows}
+            </tbody>
+        </table>
+        <div class="scorecard-footer">🌿</div>
+    </div>"""
+
 
 # ── Load Data ──────────────────────────────────────────────────
 try:
@@ -187,9 +408,42 @@ with st.sidebar:
 vol_col = get_volume_col(time_period)
 
 # ── TABS ───────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4 = st.tabs([
-    "Portfolio Overview", "Chain Deep Dive", "SKU Performance", "Growth & Distribution"
+tab0, tab1, tab2, tab3, tab4 = st.tabs([
+    "B2B Scorecard", "Portfolio Overview", "Chain Deep Dive", "SKU Performance", "Growth & Distribution"
 ])
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# TAB 0: B2B SALES SCORECARD
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+with tab0:
+    st.markdown(SCORECARD_CSS, unsafe_allow_html=True)
+
+    # Inline chain filter for scorecard
+    sc_chains = ["All Chains"] + sorted(filtered_doors['chain_name'].dropna().unique().tolist())
+    sc_selected = st.selectbox("Chain", sc_chains, index=0, key="scorecard_chain")
+
+    # Compute KPIs
+    sc_kpis, ytd_val = compute_scorecard_kpis(filtered_doors, filtered_sku, sc_selected)
+
+    # BANs — top 4 headline metrics
+    b1, b2, b3, b4 = st.columns(4)
+    active_val = sc_kpis[1][2]    # Active Doors (L90D)
+    velocity_val = sc_kpis[3][2]  # Velocity per Account
+    reorder_val = sc_kpis[5][2]   # Reorder Rate
+
+    with b1:
+        render_metric("YTD Depletions", format_number(ytd_val), "case equivalents", color="green")
+    with b2:
+        render_metric("Active Doors", format_number(active_val), "L90D PODs", color="purple")
+    with b3:
+        render_metric("Velocity / Acct", f"{velocity_val:,.1f}", "CE per door (L90D)", color="gold")
+    with b4:
+        reorder_color = "green" if reorder_val >= 40 else "red" if reorder_val < 25 else "gold"
+        render_metric("Reorder Rate", f"{reorder_val:,.1f}%", "2x+ orders (L3M)", color=reorder_color)
+
+    # Scorecard table
+    st.markdown(render_scorecard_html(sc_kpis), unsafe_allow_html=True)
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # TAB 1: PORTFOLIO OVERVIEW
