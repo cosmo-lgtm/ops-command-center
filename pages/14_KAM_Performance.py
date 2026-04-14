@@ -64,6 +64,22 @@ def load_door_data():
 
 
 @st.cache_data(ttl=300)
+def load_all_doors_for_scorecard():
+    """Full outlet universe (chains + independents) for B2B scorecard totals.
+    Matches VIP's 'cleansed outlet information' report scope.
+    """
+    client = get_bq_client()
+    query = """
+    SELECT
+        vip_id, chain_name, channel_type,
+        qty_ytd, qty_last_30_days, qty_previous_30_days,
+        qty_last_90_days, qty_previous_90_days
+    FROM `staging_vip.retail_customer_fact_sheet_2026`
+    """
+    return client.query(query).to_dataframe()
+
+
+@st.cache_data(ttl=300)
 def load_chain_data():
     client = get_bq_client()
     return client.query("SELECT * FROM `staging_vip.chain_hq_fact_sheet_2026`").to_dataframe()
@@ -352,6 +368,7 @@ try:
     door_df = load_door_data()
     chain_df = load_chain_data()
     sku_df = load_sku_data()
+    all_doors_df = load_all_doors_for_scorecard()
 except Exception as e:
     st.error(f"Failed to load data: {e}")
     st.stop()
@@ -420,8 +437,10 @@ with tab0:
     sc_chains = ["All Chains"] + sorted(filtered_doors['chain_name'].dropna().unique().tolist())
     sc_selected = st.selectbox("Chain", sc_chains, index=0, key="scorecard_chain")
 
-    # Compute KPIs
-    sc_kpis, ytd_val = compute_scorecard_kpis(filtered_doors, filtered_sku, sc_selected)
+    # "All Chains" uses full outlet universe (chains + independents) to match
+    # VIP's "cleansed outlet information" report. Chain selection uses chain-filtered doors.
+    sc_doors = all_doors_df if sc_selected == "All Chains" else filtered_doors
+    sc_kpis, ytd_val = compute_scorecard_kpis(sc_doors, filtered_sku, sc_selected)
 
     # BANs — top 4 headline metrics
     b1, b2, b3, b4 = st.columns(4)
