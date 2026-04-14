@@ -626,9 +626,12 @@ with tab0:
     if sc_selected == "All Chains":
         ytd_depl = float(universe_totals.get('ytd_volume') or 0)
         ytd_active = int(universe_totals.get('ytd_active_doors') or 0)
+        py_ytd_depl = float(universe_totals.get('py_ytd_volume') or 0)
+        py_ytd_active = int(universe_totals.get('py_ytd_active_doors') or 0)
     else:
         ytd_depl = float(sc_doors['qty_ytd'].fillna(0).sum())
         ytd_active = int((sc_doors['qty_ytd'].fillna(0) > 0).sum())
+        py_ytd_depl = py_ytd_active = 0  # chain-filtered PY not derivable yet
     velocity_val = sc_kpis[3][2]; velocity_prior = sc_kpis[3][3]
     reorder_val = sc_kpis[5][2];  reorder_prior = sc_kpis[5][3]
 
@@ -660,9 +663,9 @@ with tab0:
     st.markdown(
         "<div class='bn-row'>"
         + _ban("YTD Volume", format_number(ytd_depl),
-               ytd_depl, None, "case equivalents · YTD")
+               ytd_depl, py_ytd_depl or None, "case equivalents · vs PY YTD")
         + _ban("Active Doors", format_number(ytd_active),
-               ytd_active, None, "doors w/ YTD sales")
+               ytd_active, py_ytd_active or None, "doors w/ YTD sales · vs PY")
         + _ban("Velocity / Acct", f"{velocity_val:,.1f}",
                velocity_val, velocity_prior, "CE per active door (L90D)")
         + _ban("Reorder Rate", f"{reorder_val:,.1f}%",
