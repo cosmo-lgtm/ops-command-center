@@ -80,6 +80,26 @@ def load_all_doors_for_scorecard():
 
 
 @st.cache_data(ttl=300)
+def load_data_through_dates():
+    """Latest order dates per source so the dashboard can label timeframes."""
+    client = get_bq_client()
+    query = """
+    SELECT
+      (SELECT MAX(most_recent_order_date)
+         FROM `staging_vip.retail_customer_fact_sheet_2026`
+         WHERE most_recent_order_date IS NOT NULL) AS fact_sheet_through,
+      (SELECT MAX(transaction_date)
+         FROM `analytics.vip_sales_2026`
+         WHERE transaction_date IS NOT NULL) AS vip_sales_through
+    """
+    row = client.query(query).to_dataframe().iloc[0]
+    return {
+        'fact_sheet_through': row['fact_sheet_through'],
+        'vip_sales_through': row['vip_sales_through'],
+    }
+
+
+@st.cache_data(ttl=300)
 def load_chain_data():
     client = get_bq_client()
     return client.query("SELECT * FROM `staging_vip.chain_hq_fact_sheet_2026`").to_dataframe()
@@ -279,17 +299,21 @@ def compute_scorecard_kpis(doors, skus, chain_filter="All Chains"):
         off_prem_pct = off_prem_current / len(active_l90) * 100 if active_l90 else 0
         off_prem_pct_prior = off_prem_prior / len(active_p90) * 100 if active_p90 else 0
 
-        # 6. Reorder Rate — doors with orders in 2+ of last 3 months (L30 + P30 + P60-90)
-        # Approximate from fact sheet: doors ordering in both L30 and P30 windows
+        # 6. Reorder Rate — doors ordering in both the last-30 and the 30-60d window.
         ordered_l30 = doors['qty_last_30_days'] > 0
         ordered_p30 = doors['qty_previous_30_days'] > 0
-        any_active = doors['qty_last_90_days'] > 0
-        total_active_doors = any_active.sum()
+        any_active_current = doors['qty_last_90_days'] > 0
+        total_active_current = any_active_current.sum()
         reorder_doors = (ordered_l30 & ordered_p30).sum()
-        reorder_rate = reorder_doors / total_active_doors * 100 if total_active_doors > 0 else 0
+        reorder_rate = reorder_doors / total_active_current * 100 if total_active_current > 0 else 0
 
-        # Prior period reorder approximation not available from fact sheet — show vs current
-        reorder_rate_prior = 0  # No prior granularity available
+        # Prior-period reorder: doors ordering in p30 AND in the 60-90d slice.
+        # 60-90d slice = qty_previous_90_days - qty_previous_30_days > 0.
+        prior_60_90 = (doors['qty_previous_90_days'].fillna(0) - doors['qty_previous_30_days'].fillna(0)) > 0
+        any_active_prior = doors['qty_previous_90_days'] > 0
+        total_active_prior = any_active_prior.sum()
+        reorder_doors_prior = (ordered_p30 & prior_60_90).sum()
+        reorder_rate_prior = reorder_doors_prior / total_active_prior * 100 if total_active_prior > 0 else 0
     else:
         depl_current = depl_prior = ytd_total = 0
         active_current = active_prior = 0
@@ -369,6 +393,7 @@ try:
     chain_df = load_chain_data()
     sku_df = load_sku_data()
     all_doors_df = load_all_doors_for_scorecard()
+    data_through = load_data_through_dates()
 except Exception as e:
     st.error(f"Failed to load data: {e}")
     st.stop()
@@ -432,6 +457,16 @@ tab0, tab1, tab2, tab3, tab4 = st.tabs([
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 with tab0:
     st.markdown(SCORECARD_CSS, unsafe_allow_html=True)
+
+    fs_through = data_through.get('fact_sheet_through')
+    sales_through = data_through.get('vip_sales_through')
+    fs_str = pd.to_datetime(fs_through).strftime('%b %d, %Y') if fs_through else '—'
+    sales_str = pd.to_datetime(sales_through).strftime('%b %d, %Y') if sales_through else '—'
+    st.caption(
+        f"Depletions / doors / velocity data through **{fs_str}** "
+        f"(VIP retail fact sheet). SKU-level data through **{sales_str}** "
+        f"(VIP monthly sales)."
+    )
 
     # Inline chain filter for scorecard
     sc_chains = ["All Chains"] + sorted(filtered_doors['chain_name'].dropna().unique().tolist())
