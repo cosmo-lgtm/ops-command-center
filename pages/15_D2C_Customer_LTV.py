@@ -18,14 +18,14 @@ inject_editorial_style()
 
 
 COLORS = {
-    'primary': '#f093fb',
-    'secondary': '#f5576c',
-    'teal': '#00d4aa',
-    'gold': '#ffd666',
-    'blue': '#74b9ff',
-    'purple': '#667eea',
+    'primary': '#2D2926',
+    'secondary': '#074A7A',
+    'teal': '#3F634E',
+    'gold': '#8a6b00',
+    'blue': '#074A7A',
+    'purple': '#074A7A',
     'woo': '#96588a',
-    'shopify': '#95bf47',
+    'shopify': '#3F634E',
 }
 
 
@@ -535,24 +535,25 @@ def main():
         return f"{r['qualifying_cohorts']} cohorts · {r['earliest_cohort']} → {r['latest_cohort']}"
 
     # --- KPI Row ---
+    avg_ltv = total_revenue / total_customers if total_customers else 0
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     with c1:
         rev_display = f"${total_revenue/1e6:.1f}M" if total_revenue >= 1e6 else f"${total_revenue/1e3:.0f}K"
-        st.markdown(render_metric(rev_display, "Lifetime Revenue"), unsafe_allow_html=True)
+        st.markdown(render_metric(rev_display, "Lifetime Revenue", sub=f"${avg_ltv:.0f} avg per customer"), unsafe_allow_html=True)
     with c2:
-        st.markdown(render_metric(f"{total_customers:,.0f}", "Unique Customers", style="teal"), unsafe_allow_html=True)
+        st.markdown(render_metric(f"{total_customers:,.0f}", "Unique Customers", sub=f"{repeat_customers:,.0f} repeat ({repeat_rate:.0f}%)"), unsafe_allow_html=True)
     with c3:
-        st.markdown(render_metric(f"${ltv_6mo['ltv']:.0f}", "6-Month LTV", style="gold", sub=_fmt_ltv_sub(ltv_6mo)), unsafe_allow_html=True)
+        st.markdown(render_metric(f"${ltv_6mo['ltv']:.0f}", "6-Month LTV", sub=_fmt_ltv_sub(ltv_6mo)), unsafe_allow_html=True)
     with c4:
         st.markdown(render_metric(f"${ltv_12mo['ltv']:.0f}", "12-Month LTV", sub=_fmt_ltv_sub(ltv_12mo)), unsafe_allow_html=True)
     with c5:
-        st.markdown(render_metric(f"{repeat_rate:.1f}%", "Repeat Rate", style="teal", sub=f"{repeat_customers:,.0f} repeat"), unsafe_allow_html=True)
+        st.markdown(render_metric(f"{repeat_rate:.1f}%", "Repeat Rate", sub=f"{repeat_customers:,.0f} of {total_customers:,.0f}"), unsafe_allow_html=True)
     with c6:
         if platform == "All":
-            st.markdown(render_metric(f"{cross_platform:,.0f}", "Cross-Platform", style="blue", sub="Woo + Shopify"), unsafe_allow_html=True)
+            st.markdown(render_metric(f"{cross_platform:,.0f}", "Cross-Platform", sub="ordered on Woo + Shopify"), unsafe_allow_html=True)
         else:
             lifespan = _f(s['avg_lifespan_days'])
-            st.markdown(render_metric(f"{lifespan:.0f}d", "Avg Lifespan", style="blue", sub="days between orders"), unsafe_allow_html=True)
+            st.markdown(render_metric(f"{lifespan:.0f}d", "Avg Lifespan", sub="days between orders"), unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -562,7 +563,7 @@ def main():
         shopify_pct = 100 - woo_pct
         st.markdown(f"""
         <div class="insight-banner">
-            <strong style="color: #f093fb;">Platform Split:</strong>
+            <strong>Platform Split:</strong>
             <span style="color: {COLORS['woo']}; margin-left: 12px;">WooCommerce</span>
             ${woo_revenue/1e6:.1f}M ({woo_pct:.0f}%) &bull; {woo_customers:,.0f} customers
             &nbsp;&nbsp;|&nbsp;&nbsp;
@@ -614,7 +615,7 @@ def main():
 
             apply_dark_theme(fig, height=400,
                 barmode='stack',
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#8892b0')),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#6B6560')),
                 xaxis={'title': ''},
                 yaxis={'title': 'Revenue ($)'}
             )
@@ -637,7 +638,7 @@ def main():
                 ))
 
             apply_dark_theme(fig2, height=300,
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#8892b0')),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#6B6560')),
                 yaxis={'title': 'Orders'}
             )
             st.plotly_chart(fig2, use_container_width=True)
@@ -665,11 +666,11 @@ def main():
                     ),
                     text=dist['customers'].apply(lambda x: f'{_f(x):,.0f}'),
                     textposition='outside',
-                    textfont=dict(color='#ccd6f6', size=11),
+                    textfont=dict(color='#2D2926', size=11),
                     hovertemplate='%{x}<br>%{y:,.0f} customers<extra></extra>'
                 ))
                 apply_dark_theme(fig, height=350, yaxis={'title': 'Customers'})
-                fig.update_layout(title=dict(text='Customers by LTV Bucket', font=dict(color='#8892b0', size=14)))
+                fig.update_layout(title=dict(text='Customers by LTV Bucket', font=dict(color='#6B6560', size=14)))
                 st.plotly_chart(fig, use_container_width=True)
 
             with col2:
@@ -678,15 +679,15 @@ def main():
                     y=dist['bucket_revenue'].astype(float),
                     marker=dict(
                         color=dist['bucket_order'].astype(float),
-                        colorscale=[[0, '#ffd666'], [0.5, '#ff9f43'], [1, '#f5576c']],
+                        colorscale=[[0, '#C4D6E5'], [0.5, '#074A7A'], [1, '#2D2926']],
                     ),
                     text=dist['bucket_revenue'].apply(lambda x: f'${_f(x)/1000:.0f}K'),
                     textposition='outside',
-                    textfont=dict(color='#ccd6f6', size=11),
+                    textfont=dict(color='#2D2926', size=11),
                     hovertemplate='%{x}<br>$%{y:,.0f} revenue<extra></extra>'
                 ))
                 apply_dark_theme(fig2, height=350, yaxis={'title': 'Revenue ($)'})
-                fig2.update_layout(title=dict(text='Revenue by LTV Bucket', font=dict(color='#8892b0', size=14)))
+                fig2.update_layout(title=dict(text='Revenue by LTV Bucket', font=dict(color='#6B6560', size=14)))
                 st.plotly_chart(fig2, use_container_width=True)
 
             # Key insight
@@ -700,7 +701,7 @@ def main():
                 rev_pct = top_rev / total_rev * 100 if total_rev else 0
                 st.markdown(f"""
                 <div class="insight-banner">
-                    <strong style="color: #ffd666;">$1K+ Customers:</strong>
+                    <strong style="color: #074A7A;">$1K+ Customers:</strong>
                     {top_cust:,.0f} customers ({top_pct:.1f}%) drive ${top_rev/1e6:.1f}M ({rev_pct:.0f}%) of total revenue
                 </div>
                 """, unsafe_allow_html=True)
@@ -732,19 +733,19 @@ def main():
                 marker=dict(size=8),
                 text=repeat_df['repeat_rate'].apply(lambda x: f'{_f(x):.0f}%'),
                 textposition='top center',
-                textfont=dict(color='#ccd6f6', size=10),
+                textfont=dict(color='#2D2926', size=10),
                 hovertemplate='%{x}<br>%{y:.1f}% repeat<extra></extra>'
             ))
 
             apply_dark_theme(fig3, height=350,
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#8892b0')),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#6B6560')),
                 yaxis={'title': 'Repeat Rate (%)', 'range': [0, 100]},
             )
             fig3.update_layout(
                 yaxis2=dict(
                     overlaying='y', side='right', showgrid=False,
-                    title=dict(text='Customers', font=dict(color='#8892b0')),
-                    tickfont=dict(color='#5a6a8a')
+                    title=dict(text='Customers', font=dict(color='#6B6560')),
+                    tickfont=dict(color='#6B6560')
                 )
             )
             st.plotly_chart(fig3, use_container_width=True)
@@ -781,20 +782,20 @@ def main():
                         x=[f'M{i}' for i in retention_pct.columns],
                         y=retention_pct.index.tolist(),
                         colorscale=[
-                            [0, '#0f0f1a'],
-                            [0.05, '#1a1a3e'],
-                            [0.15, '#2a2a6a'],
-                            [0.3, '#667eea'],
-                            [0.5, '#f093fb'],
-                            [1.0, '#f5576c']
+                            [0, '#F5F0EB'],
+                            [0.05, '#E8DFD6'],
+                            [0.15, '#C4D6E5'],
+                            [0.3, '#074A7A'],
+                            [0.5, '#3F634E'],
+                            [1.0, '#2D2926']
                         ],
                         text=z_text,
                         texttemplate='%{text}',
-                        textfont=dict(size=9, color='#ccd6f6'),
+                        textfont=dict(size=9, color='#2D2926'),
                         hovertemplate='Cohort: %{y}<br>Month: %{x}<br>Retention: %{z:.1f}%<extra></extra>',
                         colorbar=dict(
-                            title=dict(text='Retention %', font=dict(color='#8892b0')),
-                            tickfont=dict(color='#8892b0')
+                            title=dict(text='Retention %', font=dict(color='#6B6560')),
+                            tickfont=dict(color='#6B6560')
                         )
                     ))
 
@@ -808,8 +809,8 @@ def main():
             # --- Cumulative $ / customer matrix (Joe's ask, 2026-04-07) ---
             st.markdown('<p class="section-header">Cumulative Revenue per Customer by Cohort</p>', unsafe_allow_html=True)
             st.markdown(
-                '<div class="insight-banner" style="border-left-color: #ffd666;">'
-                '<strong style="color: #ffd666;">Mature-cohort view:</strong> '
+                '<div class="insight-banner" style="border-left-color: #074A7A;">'
+                '<strong style="color: #074A7A;">Mature-cohort view:</strong> '
                 'cells show cumulative $/customer from M0 through M_n. '
                 'Blank cells past the diagonal are cohorts that have not yet baked through that month — '
                 'comparing them to fully-elapsed cohorts would understate LTV.'
@@ -847,12 +848,12 @@ def main():
                     ],
                     text=z_text,
                     texttemplate='%{text}',
-                    textfont=dict(size=9, color='#ccd6f6'),
+                    textfont=dict(size=9, color='#2D2926'),
                     hovertemplate='Cohort: %{y}<br>Month: %{x}<br>Cumulative $/customer: $%{z:,.2f}<extra></extra>',
                     hoverongaps=False,
                     colorbar=dict(
-                        title=dict(text='$ / customer', font=dict(color='#8892b0')),
-                        tickfont=dict(color='#8892b0'),
+                        title=dict(text='$ / customer', font=dict(color='#6B6560')),
+                        tickfont=dict(color='#6B6560'),
                     ),
                 ))
 
@@ -897,7 +898,7 @@ def main():
                     ))
 
                 apply_dark_theme(fig2, height=400,
-                    legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02, font=dict(color='#8892b0', size=10)),
+                    legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02, font=dict(color='#6B6560', size=10)),
                     xaxis={'title': 'Months Since First Purchase'},
                     yaxis={'title': 'Cumulative Revenue / Customer ($)'}
                 )
@@ -928,7 +929,7 @@ def main():
 
     # Footer
     st.markdown("""
-    <div style="text-align: center; color: #8892b0; margin-top: 48px; padding: 24px; border-top: 1px solid rgba(255,255,255,0.1);">
+    <div style="text-align: center; color: #6B6560; margin-top: 48px; padding: 24px; border-top: 1px solid rgba(45,41,38,0.1);">
         <p style="margin: 0;">Data: WooCommerce (Mar 2023 - Sep 2025) + Shopify (Jun 2025+)</p>
         <p style="margin: 4px 0 0 0; font-size: 12px;">Overlap period (Jun-Sep 2025) deduplicated by email + date + amount</p>
     </div>
