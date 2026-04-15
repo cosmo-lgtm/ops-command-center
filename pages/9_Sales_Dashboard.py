@@ -122,14 +122,13 @@ def load_b2c_daily(start_date: str, end_date: str, net_revenue: bool = False):
     revenue_col = "current_subtotal_price" if net_revenue else "total_line_items_price"
     return run_query(f"""
     SELECT
-        DATE(created_at) as order_date,
+        DATE(created_at, 'America/Los_Angeles') as order_date,
         COUNT(DISTINCT id) as order_count,
         ROUND(SUM(CAST({revenue_col} AS FLOAT64)), 2) as revenue,
-        EXTRACT(DAYOFWEEK FROM created_at) as day_of_week
+        EXTRACT(DAYOFWEEK FROM DATETIME(created_at, 'America/Los_Angeles')) as day_of_week
     FROM `artful-logic-475116-p1.raw_shopify.orders` /* TODO migrate to v_d2c_orders_universe once column parity confirmed */
-    WHERE cancelled_at IS NULL
-        AND DATE(created_at) >= '{start_date}'
-        AND DATE(created_at) <= '{end_date}'
+    WHERE DATE(created_at, 'America/Los_Angeles') >= '{start_date}'
+        AND DATE(created_at, 'America/Los_Angeles') <= '{end_date}'
     GROUP BY order_date, day_of_week
     ORDER BY order_date
     """)
@@ -141,13 +140,12 @@ def load_b2c_weekly(start_date: str, end_date: str, net_revenue: bool = False):
     revenue_col = "current_subtotal_price" if net_revenue else "total_line_items_price"
     return run_query(f"""
     SELECT
-        DATE_TRUNC(DATE(created_at), WEEK(MONDAY)) as week_start,
+        DATE_TRUNC(DATE(created_at, 'America/Los_Angeles'), WEEK(MONDAY)) as week_start,
         COUNT(DISTINCT id) as order_count,
         ROUND(SUM(CAST({revenue_col} AS FLOAT64)), 2) as revenue
     FROM `artful-logic-475116-p1.raw_shopify.orders` /* TODO migrate to v_d2c_orders_universe once column parity confirmed */
-    WHERE cancelled_at IS NULL
-        AND DATE(created_at) >= '{start_date}'
-        AND DATE(created_at) <= '{end_date}'
+    WHERE DATE(created_at, 'America/Los_Angeles') >= '{start_date}'
+        AND DATE(created_at, 'America/Los_Angeles') <= '{end_date}'
     GROUP BY week_start
     ORDER BY week_start
     """)
@@ -162,7 +160,7 @@ def load_b2c_products(start_date: str, end_date: str, net_revenue: bool = False)
         WITH order_items AS (
             SELECT
                 o.id as order_id,
-                DATE(o.created_at) as order_date,
+                DATE(o.created_at, 'America/Los_Angeles') as order_date,
                 JSON_VALUE(item, '$.title') as product_name,
                 JSON_VALUE(item, '$.sku') as sku,
                 CAST(JSON_VALUE(item, '$.quantity') AS INT64) as quantity,
@@ -170,9 +168,8 @@ def load_b2c_products(start_date: str, end_date: str, net_revenue: bool = False)
                 COALESCE(SAFE_CAST(JSON_VALUE(item, '$.total_discount') AS FLOAT64), 0) as line_discount
             FROM `artful-logic-475116-p1.raw_shopify.orders` /* TODO migrate to v_d2c_orders_universe once column parity confirmed */ o,
             UNNEST(JSON_QUERY_ARRAY(o.line_items)) as item
-            WHERE o.cancelled_at IS NULL
-                AND DATE(o.created_at) >= '{start_date}'
-                AND DATE(o.created_at) <= '{end_date}'
+    WHERE DATE(o.created_at, 'America/Los_Angeles') >= '{start_date}'
+                AND DATE(o.created_at, 'America/Los_Angeles') <= '{end_date}'
         )
         SELECT
             product_name,
@@ -194,16 +191,15 @@ def load_b2c_products(start_date: str, end_date: str, net_revenue: bool = False)
         WITH order_items AS (
             SELECT
                 o.id as order_id,
-                DATE(o.created_at) as order_date,
+                DATE(o.created_at, 'America/Los_Angeles') as order_date,
                 JSON_VALUE(item, '$.title') as product_name,
                 JSON_VALUE(item, '$.sku') as sku,
                 CAST(JSON_VALUE(item, '$.quantity') AS INT64) as quantity,
                 CAST(JSON_VALUE(item, '$.price') AS FLOAT64) as unit_price
             FROM `artful-logic-475116-p1.raw_shopify.orders` /* TODO migrate to v_d2c_orders_universe once column parity confirmed */ o,
             UNNEST(JSON_QUERY_ARRAY(o.line_items)) as item
-            WHERE o.cancelled_at IS NULL
-                AND DATE(o.created_at) >= '{start_date}'
-                AND DATE(o.created_at) <= '{end_date}'
+    WHERE DATE(o.created_at, 'America/Los_Angeles') >= '{start_date}'
+                AND DATE(o.created_at, 'America/Los_Angeles') <= '{end_date}'
         )
         SELECT
             product_name,
@@ -253,9 +249,8 @@ def load_b2c_by_state(start_date: str, end_date: str, net_revenue: bool = False)
         COUNT(DISTINCT id) as order_count,
         ROUND(SUM(CAST({revenue_col} AS FLOAT64)), 2) as revenue
     FROM `artful-logic-475116-p1.raw_shopify.orders` /* TODO migrate to v_d2c_orders_universe once column parity confirmed */
-    WHERE cancelled_at IS NULL
-        AND DATE(created_at) >= '{start_date}'
-        AND DATE(created_at) <= '{end_date}'
+    WHERE DATE(created_at, 'America/Los_Angeles') >= '{start_date}'
+        AND DATE(created_at, 'America/Los_Angeles') <= '{end_date}'
         AND JSON_VALUE(shipping_address, '$.province_code') IS NOT NULL
         AND TRIM(JSON_VALUE(shipping_address, '$.province_code')) != ''
         AND JSON_VALUE(shipping_address, '$.country_code') = 'US'
@@ -301,9 +296,8 @@ def load_b2c_revenue_breakdown(start_date: str, end_date: str):
         ROUND(SUM(CAST(current_subtotal_price AS FLOAT64)), 2) AS net_sales,
         COUNT(DISTINCT id) AS orders
     FROM `artful-logic-475116-p1.raw_shopify.orders`
-    WHERE cancelled_at IS NULL
-        AND DATE(created_at) >= '{start_date}'
-        AND DATE(created_at) <= '{end_date}'
+    WHERE DATE(created_at, 'America/Los_Angeles') >= '{start_date}'
+        AND DATE(created_at, 'America/Los_Angeles') <= '{end_date}'
     """)
 
 
@@ -443,7 +437,7 @@ def load_b2c_sku_daily(start_date: str, end_date: str, net_revenue: bool = False
     return run_query(f"""
     WITH order_items AS (
         SELECT
-            DATE(o.created_at) as order_date,
+            DATE(o.created_at, 'America/Los_Angeles') as order_date,
             JSON_VALUE(item, '$.title') as product_name,
             JSON_VALUE(item, '$.sku') as sku,
             CAST(JSON_VALUE(item, '$.quantity') AS INT64) as quantity,
@@ -452,9 +446,8 @@ def load_b2c_sku_daily(start_date: str, end_date: str, net_revenue: bool = False
             o.id as order_id
         FROM `artful-logic-475116-p1.raw_shopify.orders` /* TODO migrate to v_d2c_orders_universe once column parity confirmed */ o,
         UNNEST(JSON_QUERY_ARRAY(o.line_items)) as item
-        WHERE o.cancelled_at IS NULL
-            AND DATE(o.created_at) >= '{start_date}'
-            AND DATE(o.created_at) <= '{end_date}'
+    WHERE DATE(o.created_at, 'America/Los_Angeles') >= '{start_date}'
+            AND DATE(o.created_at, 'America/Los_Angeles') <= '{end_date}'
     )
     SELECT
         order_date,
@@ -480,7 +473,7 @@ def load_b2c_sku_weekly(start_date: str, end_date: str, net_revenue: bool = Fals
     return run_query(f"""
     WITH order_items AS (
         SELECT
-            DATE_TRUNC(DATE(o.created_at), WEEK(MONDAY)) as week_start,
+            DATE_TRUNC(DATE(o.created_at, 'America/Los_Angeles'), WEEK(MONDAY)) as week_start,
             JSON_VALUE(item, '$.title') as product_name,
             JSON_VALUE(item, '$.sku') as sku,
             CAST(JSON_VALUE(item, '$.quantity') AS INT64) as quantity,
@@ -489,9 +482,8 @@ def load_b2c_sku_weekly(start_date: str, end_date: str, net_revenue: bool = Fals
             o.id as order_id
         FROM `artful-logic-475116-p1.raw_shopify.orders` /* TODO migrate to v_d2c_orders_universe once column parity confirmed */ o,
         UNNEST(JSON_QUERY_ARRAY(o.line_items)) as item
-        WHERE o.cancelled_at IS NULL
-            AND DATE(o.created_at) >= '{start_date}'
-            AND DATE(o.created_at) <= '{end_date}'
+    WHERE DATE(o.created_at, 'America/Los_Angeles') >= '{start_date}'
+            AND DATE(o.created_at, 'America/Los_Angeles') <= '{end_date}'
     )
     SELECT
         week_start,
