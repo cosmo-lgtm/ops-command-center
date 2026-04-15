@@ -610,11 +610,31 @@ with tab0:
     sc_doors = all_doors_df if sc_selected == "All Chains" else filtered_doors
     sc_kpis, ytd_val = compute_scorecard_kpis(sc_doors, filtered_sku, sc_selected)
 
+    # Override L90D / Prior 90D for the all-chains view with the raw-sales
+    # numbers from v_universe_totals_ytd (source of truth pinned to
+    # MAX(transaction_date) on vip_sales_2026). The fact-sheet's
+    # qty_last_90_days column under-reports ~7% because distributor
+    # invoices trickle in a few days behind raw VIP sales ingestion.
+    if sc_selected == "All Chains":
+        sc_kpis = list(sc_kpis)
+        depl_row        = list(sc_kpis[0])
+        active_row      = list(sc_kpis[1])
+        velocity_row    = list(sc_kpis[3])
+        depl_row[2]     = float(universe_totals.get('l90d_volume') or depl_row[2])
+        depl_row[3]     = float(universe_totals.get('prior_90d_volume') or depl_row[3])
+        active_row[2]   = int(universe_totals.get('l90d_active_doors') or active_row[2])
+        active_row[3]   = int(universe_totals.get('prior_90d_active_doors') or active_row[3])
+        velocity_row[2] = (depl_row[2] / active_row[2]) if active_row[2] else 0
+        velocity_row[3] = (depl_row[3] / active_row[3]) if active_row[3] else 0
+        sc_kpis[0] = tuple(depl_row)
+        sc_kpis[1] = tuple(active_row)
+        sc_kpis[3] = tuple(velocity_row)
+
     # Guardrail: flag any KPI where current is populated but prior is 0/None
     # (almost always means a precomputed 'prior' column is broken).
     validate_kpis([
         KpiCheck(name, current=actual, prior=prior,
-                 source="retail_customer_fact_sheet_2026 / chain_sales_report_2026 monthly cols")
+                 source="v_universe_totals_ytd (raw sales) / chain_sales_report_2026 monthly cols")
         for (name, _uom, actual, prior, _suffix, _fmt) in sc_kpis
     ])
 
