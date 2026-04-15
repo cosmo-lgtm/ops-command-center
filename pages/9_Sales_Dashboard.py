@@ -879,22 +879,21 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 # TAB 1: EXECUTIVE OVERVIEW
 # ============================================================================
 with tab1:
-    # KPI Row
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    # KPI Row — native st.metric (matches card styling across all tabs)
+    col1, col2, col3 = st.columns(3)
+    col1.metric(f"Total {revenue_label}", format_currency(total_revenue), help=f"Period: {selected_preset}")
+    col2.metric(f"B2B {revenue_label}", format_currency(b2b_total),
+                delta=f"{b2b_mom:+.1f}% MoM" if b2b_mom is not None else None,
+                help=f"{b2b_pct:.0f}% of total")
+    col3.metric(f"B2C {revenue_label}", format_currency(b2c_total),
+                delta=f"{b2c_mom:+.1f}% MoM" if b2c_mom is not None else None,
+                help=f"{b2c_pct:.0f}% of total")
 
-    with col1:
-        st.markdown(render_kpi(format_currency(total_revenue), f"Total {revenue_label} ({selected_preset})"), unsafe_allow_html=True)
-    with col2:
-        st.markdown(render_kpi(format_currency(b2b_total), f"B2B {revenue_label} ({b2b_pct:.0f}%)", b2b_mom), unsafe_allow_html=True)
-    with col3:
-        st.markdown(render_kpi(format_currency(b2c_total), f"B2C {revenue_label} ({b2c_pct:.0f}%)", b2c_mom), unsafe_allow_html=True)
-    with col4:
-        st.markdown(render_kpi(format_number(total_orders), "Total Orders"), unsafe_allow_html=True)
-    with col5:
-        aov = total_revenue / total_orders if total_orders > 0 else 0
-        st.markdown(render_kpi(format_currency(aov), "Avg Order Value"), unsafe_allow_html=True)
-    with col6:
-        st.markdown(render_kpi(format_currency(forecast_total), f"{forecast_days}d Forecast"), unsafe_allow_html=True)
+    col4, col5, col6 = st.columns(3)
+    aov = total_revenue / total_orders if total_orders > 0 else 0
+    col4.metric("Total Orders", format_number(total_orders))
+    col5.metric("Avg Order Value", format_currency(aov))
+    col6.metric(f"{forecast_days}d Forecast", format_currency(forecast_total))
 
     st.divider()
 
