@@ -301,6 +301,38 @@ def load_b2c_revenue_breakdown(start_date: str, end_date: str):
     """)
 
 
+@st.cache_data(ttl=300)
+def load_qb_invoices_monthly(start_date: str, end_date: str):
+    """QBO billed revenue by month (finance source-of-truth, what James pulls)."""
+    return run_query(f"""
+    SELECT
+        FORMAT_DATE('%Y-%m', TxnDate) AS month,
+        COUNT(*) AS invoices,
+        ROUND(SUM(CAST(TotalAmt AS FLOAT64)), 2) AS billed_revenue
+    FROM `artful-logic-475116-p1.raw_quickbooks.invoices`
+    WHERE TxnDate >= '{start_date}'
+        AND TxnDate <= '{end_date}'
+    GROUP BY month
+    ORDER BY month
+    """)
+
+
+@st.cache_data(ttl=300)
+def load_qb_invoices_weekly(start_date: str, end_date: str):
+    """QBO billed revenue by week."""
+    return run_query(f"""
+    SELECT
+        DATE_TRUNC(TxnDate, WEEK(MONDAY)) AS week_start,
+        COUNT(*) AS invoices,
+        ROUND(SUM(CAST(TotalAmt AS FLOAT64)), 2) AS billed_revenue
+    FROM `artful-logic-475116-p1.raw_quickbooks.invoices`
+    WHERE TxnDate >= '{start_date}'
+        AND TxnDate <= '{end_date}'
+    GROUP BY week_start
+    ORDER BY week_start
+    """)
+
+
 # ============================================================================
 # QB CREDIT MEMO FUNCTIONS (for Net Revenue)
 # ============================================================================
@@ -971,7 +1003,60 @@ with tab1:
 # TAB 2: B2B PERFORMANCE
 # ============================================================================
 with tab2:
-    st.subheader("B2B Performance (Salesforce)")
+    st.subheader("B2B Performance")
+
+    # ── Booked (SFDC) vs Billed (QBO) reconciliation ─────────────────
+    st.markdown("##### Booked vs Billed Reconciliation")
+    st.caption("Booked = Salesforce orders (sales pipeline view). Billed = QuickBooks invoices (finance source of truth — what James reports).")
+
+    booked_monthly = run_query(f"""
+        SELECT FORMAT_DATE('%Y-%m', order_date) AS month,
+               COUNT(DISTINCT order_id) AS orders,
+               ROUND(SUM(line_revenue), 2) AS booked_revenue
+        FROM `artful-logic-475116-p1.analytics.sf_orders_normalized`
+        WHERE order_status NOT IN ('Draft','Cancelled')
+            AND order_date >= '{start_date_str}' AND order_date <= '{end_date_str}'
+        GROUP BY month ORDER BY month
+    """)
+    billed_monthly = load_qb_invoices_monthly(start_date_str, end_date_str)
+
+    if not booked_monthly.empty or not billed_monthly.empty:
+        recon = booked_monthly.merge(billed_monthly, on='month', how='outer').fillna(0)
+        recon['gap'] = recon['billed_revenue'] - recon['booked_revenue']
+        recon['gap_pct'] = (recon['gap'] / recon['booked_revenue'].replace(0, pd.NA) * 100).fillna(0)
+
+        bb1, bb2, bb3 = st.columns(3)
+        bb1.metric("Booked (SFDC)", format_currency(recon['booked_revenue'].sum()),
+                   help=f"{int(recon['orders'].sum())} orders")
+        bb2.metric("Billed (QBO)", format_currency(recon['billed_revenue'].sum()),
+                   help=f"{int(recon['invoices'].sum())} invoices")
+        gap = recon['billed_revenue'].sum() - recon['booked_revenue'].sum()
+        bb3.metric("Gap (Billed − Booked)", format_currency(gap),
+                   delta=f"{gap / recon['booked_revenue'].sum() * 100:+.1f}%" if recon['booked_revenue'].sum() else None,
+                   delta_color="off")
+
+        # Side-by-side bar chart
+        recon_long = pd.melt(recon, id_vars=['month'],
+                             value_vars=['booked_revenue', 'billed_revenue'],
+                             var_name='source', value_name='revenue')
+        recon_long['source'] = recon_long['source'].map({'booked_revenue': 'Booked (SFDC)', 'billed_revenue': 'Billed (QBO)'})
+        fig = px.bar(recon_long, x='month', y='revenue', color='source', barmode='group',
+                     color_discrete_map={'Booked (SFDC)': COLORS['b2b'], 'Billed (QBO)': COLORS['forecast']},
+                     labels={'revenue': 'Revenue', 'month': 'Month', 'source': ''})
+        apply_dark_theme(fig, height=320)
+        st.plotly_chart(fig, use_container_width=True)
+
+        recon_display = recon[['month', 'orders', 'booked_revenue', 'invoices', 'billed_revenue', 'gap', 'gap_pct']].copy()
+        recon_display['booked_revenue'] = recon_display['booked_revenue'].apply(format_currency)
+        recon_display['billed_revenue'] = recon_display['billed_revenue'].apply(format_currency)
+        recon_display['gap'] = recon_display['gap'].apply(format_currency)
+        recon_display['gap_pct'] = recon_display['gap_pct'].apply(lambda v: f"{v:+.1f}%")
+        recon_display['orders'] = recon_display['orders'].apply(format_number)
+        recon_display['invoices'] = recon_display['invoices'].apply(format_number)
+        recon_display.columns = ['Month', 'Orders', 'Booked', 'Invoices', 'Billed', 'Gap', 'Gap %']
+        st.dataframe(recon_display, hide_index=True, use_container_width=True)
+
+    st.divider()
 
     # Filters
     col1, col2 = st.columns(2)
