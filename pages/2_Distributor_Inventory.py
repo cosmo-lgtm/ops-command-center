@@ -585,9 +585,14 @@ def load_distributor_weekly_trends(lookback_weeks: int = 12):
 
 @st.cache_data(ttl=300)
 def load_woi_by_sku(distributor_ids: list = None):
-    """Load WOI by parent distributor x SKU from pre-computed mart table.
+    """Load WOI by distributor x SKU from pre-computed mart table.
 
-    Aggregated at parent distributor level (~50 distributors) not individual DCs.
+    2026-05-05: distributor_id is now SFDC parent Account.Id when a SFDC mapping
+    exists (via VIP_ID__c), else the VIP Dist_Code (e.g. 'D095'). Distros
+    without SFDC mapping (Heidelberg's 7 OH branches, Lohr, A.B. Beverage, etc.)
+    now appear here. parent_account_id distinguishes the two flavors:
+    populated for SFDC-mapped, NULL for VIP-only. See feedback memory
+    feedback_no_sfdc_filter_on_vip.md for background.
     """
     client = get_bq_client()
 
@@ -600,6 +605,8 @@ def load_woi_by_sku(distributor_ids: list = None):
     SELECT
         distributor_id,
         distributor_name,
+        parent_account_id,
+        parent_account_name,
         vip_item_code,
         product_name,
         product_category,
